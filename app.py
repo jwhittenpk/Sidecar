@@ -45,6 +45,11 @@ PERSONAL_STATUS_OPTIONS = [
     "Ready to Close",
 ]
 
+# Cycle sort: status order within current/future cycle (lower index first)
+CYCLE_STATUS_ORDER = ["In Review", "In Progress", "Todo"]
+# Linear priority sort within status: High(2) → Medium(3) → Low(4) → No priority(0)
+LINEAR_PRIORITY_SORT_ORDER = {2: 0, 3: 1, 4: 2, 0: 3}
+
 
 def get_linear_token():
     """Return Linear API token; raise if not set.
@@ -110,6 +115,7 @@ def _fetch_issues_page(token, after_cursor=None):
           updatedAt
           state { name, type }
           team { name }
+          cycle { id name number startsAt endsAt }
         }
         pageInfo { hasNextPage, endCursor }
       }
@@ -147,10 +153,26 @@ def _fetch_all_assigned_issues(token):
     return all_nodes
 
 
+def _parse_cycle(cycle_node):
+    """Extract cycle dict from Linear API node; return None if missing/invalid."""
+    if not cycle_node or not isinstance(cycle_node, dict):
+        return None
+    starts_at = cycle_node.get("startsAt")
+    ends_at = cycle_node.get("endsAt")
+    return {
+        "id": cycle_node.get("id"),
+        "name": cycle_node.get("name", ""),
+        "number": cycle_node.get("number"),
+        "starts_at": starts_at,
+        "ends_at": ends_at,
+    }
+
+
 def _normalize_issue(node):
     """Turn Linear API node into our internal shape."""
     state = node.get("state") or {}
     team = node.get("team") or {}
+    cycle = _parse_cycle(node.get("cycle"))
     return {
         "id": node["id"],
         "identifier": node.get("identifier", ""),
@@ -161,6 +183,7 @@ def _normalize_issue(node):
         "team_name": team.get("name", ""),
         "updated_at": node.get("updatedAt", ""),
         "is_completed": state.get("type") in ("completed", "canceled"),
+        "cycle": cycle,
     }
 
 
@@ -224,6 +247,142 @@ def merge_issues(linear_issues, overlay):
     return result
 
 
+def _parse_iso_date(iso_str):
+    """Parse ISO date string to datetime in UTC; return None if invalid."""
+    if not iso_str:
+        return None
+    try:
+        s = (iso_str or "").replace("Z", "+00:00")
+        return datetime.fromisoformat(s).astimezone(timezone.utc)
+    except (ValueError, AttributeError):
+        return None
+
+
+def _cycle_is_current(cycle, now_utc):
+    """True if now_utc (date or datetime) falls within cycle start and end (inclusive)."""
+    if not cycle or not now_utc:
+        return False
+    start = _parse_iso_date(cycle.get("starts_at"))
+    end = _parse_iso_date(cycle.get("ends_at"))
+    if not start or not end:
+        return False
+    now_date = now_utc.date() if hasattr(now_utc, "date") else now_utc
+    start_date = start.date()
+    end_date = end.date()
+    return start_date <= now_date <= end_date
+
+
+def _cycle_is_future(cycle, now_utc):
+    """True if cycle starts after now (UTC)."""
+    if not cycle:
+        return False
+    start = _parse_iso_date(cycle.get("starts_at"))
+    if not start:
+        return False
+    now_date = now_utc.date() if hasattr(now_utc, "date") else now_utc
+    return start.date() > now_date
+
+
+def _status_sort_key(status):
+    """Lower index = earlier in CYCLE_STATUS_ORDER; unknown statuses after."""
+    if not status:
+        return len(CYCLE_STATUS_ORDER)
+    try:
+        return CYCLE_STATUS_ORDER.index(status)
+    except ValueError:
+        return len(CYCLE_STATUS_ORDER)
+
+
+def _linear_priority_sort_key(priority):
+    """Lower value = higher priority in cycle (High→Medium→Low→None)."""
+    p = priority if priority is not None else 0
+    return LINEAR_PRIORITY_SORT_ORDER.get(p, 3)
+
+
+def _sort_within_cycle_group(issues):
+    """Sort issues by status order then linear priority (for current/future cycle groups)."""
+    return sorted(
+        issues,
+        key=lambda i: (
+            _status_sort_key(i.get("linear_status")),
+            _linear_priority_sort_key(i.get("linear_priority")),
+        ),
+    )
+
+
+def sort_issues_by_cycle(issues, now_utc=None):
+    """Sort merged issues by Cycle order: Urgent → Personal priority → Current cycle → Future cycles → No cycle.
+    Pure function: no I/O. now_utc defaults to datetime.now(timezone.utc) for testing can inject a fixed time.
+    """
+    if now_utc is None:
+        now_utc = datetime.now(timezone.utc)
+    now_date = now_utc.date() if hasattr(now_utc, "date") else now_utc
+
+    urgent = []
+    personal_priority = []
+    current_cycle = []
+    future_cycle = []
+    no_cycle = []
+
+    for issue in issues:
+        if (issue.get("linear_priority")) == 1:
+            urgent.append(issue)
+            continue
+        if issue.get("personal_priority") is not None and 1 <= issue["personal_priority"] <= 5:
+            personal_priority.append(issue)
+            continue
+        cycle = issue.get("cycle")
+        if not cycle:
+            no_cycle.append(issue)
+            continue
+        if _cycle_is_current(cycle, now_utc):
+            current_cycle.append(issue)
+        elif _cycle_is_future(cycle, now_utc):
+            future_cycle.append(issue)
+        else:
+            no_cycle.append(issue)
+
+    personal_priority.sort(key=lambda i: i.get("personal_priority") or 99)
+    current_cycle = _sort_within_cycle_group(current_cycle)
+    # Future cycles: sort by cycle start (nearest first), then within cycle by status then priority
+    def future_sort_key(i):
+        c = i.get("cycle") or {}
+        start = _parse_iso_date(c.get("starts_at")) or datetime.max.replace(tzinfo=timezone.utc)
+        return (start, _status_sort_key(i.get("linear_status")), _linear_priority_sort_key(i.get("linear_priority")))
+    future_cycle.sort(key=future_sort_key)
+    no_cycle.sort(key=lambda i: (i.get("updated_at") or ""), reverse=True)
+
+    return urgent + personal_priority + current_cycle + future_cycle + no_cycle
+
+
+def _apply_filter(issues, filter_val):
+    """Filter issues by active/completed. filter_val: 'active' | 'completed' | None (all)."""
+    if not filter_val:
+        return list(issues)
+    if filter_val == "active":
+        return [i for i in issues if not i.get("is_completed")]
+    if filter_val == "completed":
+        return [i for i in issues if i.get("is_completed")]
+    return list(issues)
+
+
+def _apply_sort(issues, sort_val):
+    """Sort issues by sort_val: 'cycle' | 'personal_priority' | 'linear_priority' | 'linear_status' | 'updated_at'."""
+    if not sort_val:
+        return list(issues)
+    if sort_val == "cycle":
+        return sort_issues_by_cycle(issues)
+    if sort_val == "personal_priority":
+        return sorted(issues, key=lambda i: (i.get("personal_priority") if i.get("personal_priority") is not None else 99))
+    if sort_val == "linear_priority":
+        return sorted(issues, key=lambda i: (i.get("linear_priority") or 0))
+    if sort_val == "linear_status":
+        return sorted(issues, key=lambda i: (i.get("linear_status") or ""))
+    if sort_val == "updated_at":
+        return sorted(issues, key=lambda i: (i.get("updated_at") or ""), reverse=True)
+    return list(issues)
+
+
 def get_cached_issues():
     """Return merged issues from cache; if cache empty, fetch from Linear then merge and cache."""
     global _issues_cache, _last_fetched
@@ -259,6 +418,12 @@ def index():
 def api_issues():
     try:
         issues = get_cached_issues()
+        filter_val = request.args.get("filter")
+        sort_val = request.args.get("sort")
+        if sort_val is None and filter_val == "active":
+            sort_val = "cycle"
+        issues = _apply_filter(issues, filter_val)
+        issues = _apply_sort(issues, sort_val)
         last = get_last_fetched()
         return jsonify({"issues": issues, "last_fetched": last})
     except ValueError as e:
