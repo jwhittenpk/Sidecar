@@ -1,0 +1,97 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Skip if CHANGELOG-only commit
+        id: skip
+        run: |
+          MSG=$(git log -1 --pretty=%B)
+          if echo "$MSG" | grep -qE '^chore: update CHANGELOG'; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set up Python
+        if: steps.skip.outputs.skip != 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set version
+        if: steps.skip.outputs.skip != 'true'
+        id: setver
+        run: |
+          TAGS=$(git tag -l)
+          if [ -n "$TAGS" ]; then
+            LATEST=$(git describe --tags --abbrev=0)
+            V="${LATEST#v}"
+            IFS=. read -r MAJOR MINOR PATCH <<< "$V"
+            [ -z "$PATCH" ] && PATCH=0
+            if git log -1 --pretty=%B | grep -qiE '^feat[(:]'; then
+              MINOR=$((MINOR + 1))
+              PATCH=0
+            else
+              PATCH=$((PATCH + 1))
+            fi
+            NEW="v${MAJOR}.${MINOR}.${PATCH}"
+          else
+            NEW="v0.1.0"
+          fi
+          echo "new_version=$NEW" >> $GITHUB_OUTPUT
+
+      - name: Create tag and release
+        if: steps.skip.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NEW="${{ steps.setver.outputs.new_version }}"
+          git tag "$NEW"
+          git push origin "$NEW"
+          # Generate release notes from commits since previous tag
+          PREV=$(git describe --tags --abbrev=0 "$NEW^" 2>/dev/null || echo "")
+          if [ -z "$PREV" ]; then
+            NOTES=$(git log --pretty=format:"- %s" "$NEW")
+          else
+            NOTES=$(git log --pretty=format:"- %s" "$PREV..$NEW")
+          fi
+          gh release create "$NEW" --notes "$NOTES"
+
+      - name: Update CHANGELOG
+        if: steps.skip.outputs.skip != 'true'
+        run: |
+          NEW="${{ steps.setver.outputs.new_version }}"
+          PREV=$(git describe --tags --abbrev=0 "$NEW^" 2>/dev/null || echo "")
+          if [ -z "$PREV" ]; then
+            COMMITS=$(git log --pretty=format:"- %s" "$NEW")
+          else
+            COMMITS=$(git log --pretty=format:"- %s" "$PREV..$NEW")
+          fi
+          HEADER="## $NEW"
+          if [ -f CHANGELOG.md ]; then
+            (echo "$HEADER"; echo ""; echo "$COMMITS"; echo ""; cat CHANGELOG.md) > CHANGELOG.md.new
+            mv CHANGELOG.md.new CHANGELOG.md
+          else
+            echo "$HEADER" > CHANGELOG.md
+            echo "" >> CHANGELOG.md
+            echo "$COMMITS" >> CHANGELOG.md
+          fi
+
+      - name: Commit CHANGELOG
+        if: steps.skip.outputs.skip != 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          git diff --staged --quiet || git commit -m "chore: update CHANGELOG for ${{ steps.setver.outputs.new_version }}"
+          git push origin main

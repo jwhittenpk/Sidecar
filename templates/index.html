@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Linear Dashboard</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --surface: #1a2332;
+      --border: #2d3a4d;
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --link: #58a6ff;
+      --priority-urgent: #f85149;
+      --priority-high: #db6d28;
+      --priority-medium: #d29922;
+      --priority-low: #3fb950;
+      --priority-none: #8b949e;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 1rem 2rem 2rem;
+      min-height: 100vh;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+      flex-wrap: wrap;
+      margin-bottom: 1.5rem;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid var(--border);
+    }
+    h1 { margin: 0; font-size: 1.5rem; font-weight: 600; }
+    .last-fetched { color: var(--text-muted); font-size: 0.875rem; }
+    button {
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.875rem;
+    }
+    button:hover { background: var(--border); }
+    button.primary { background: var(--link); border-color: var(--link); color: #fff; }
+    button.primary:hover { opacity: 0.9; }
+    .controls {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+    .controls label { font-size: 0.875rem; color: var(--text-muted); }
+    select, input[type="text"] {
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 0.4rem 0.6rem;
+      border-radius: 4px;
+      font-size: 0.875rem;
+    }
+    input[type="text"] { min-width: 200px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.875rem;
+    }
+    th, td {
+      padding: 0.6rem 0.75rem;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    th { color: var(--text-muted); font-weight: 500; }
+    tr.completed { opacity: 0.75; }
+    tr.completed td { color: var(--text-muted); }
+    a { color: var(--link); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .badge {
+      display: inline-block;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 500;
+    }
+    .priority-0 { background: var(--priority-none); color: var(--bg); }
+    .priority-1 { background: var(--priority-urgent); color: #fff; }
+    .priority-2 { background: var(--priority-high); color: #fff; }
+    .priority-3 { background: var(--priority-medium); color: #000; }
+    .priority-4 { background: var(--priority-low); color: #000; }
+    .notes-preview {
+      max-width: 220px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      cursor: pointer;
+      color: var(--text-muted);
+    }
+    .notes-preview:hover { color: var(--link); text-decoration: underline; }
+    .notes-preview.empty { font-style: italic; }
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.5rem;
+      min-width: 400px;
+      max-width: 90vw;
+    }
+    .modal h2 { margin: 0 0 1rem; font-size: 1.1rem; }
+    .modal textarea {
+      width: 100%;
+      min-height: 100px;
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.5rem;
+      font-family: inherit;
+      font-size: 0.875rem;
+      margin-bottom: 1rem;
+      resize: vertical;
+    }
+    .modal .field { margin-bottom: 0.75rem; }
+    .modal .field label { display: block; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1rem; }
+    .loading, .empty { text-align: center; color: var(--text-muted); padding: 2rem; }
+    .error { color: var(--priority-urgent); padding: 0.5rem 0; font-size: 0.875rem; }
+    select.flat { border: none; background: transparent; color: inherit; cursor: pointer; padding: 0.2rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>My Linear Dashboard</h1>
+    <button type="button" id="refresh-btn">Refresh</button>
+    <span class="last-fetched" id="last-fetched">Last fetched: —</span>
+  </header>
+
+  <div class="controls">
+    <label>Filter:</label>
+    <select id="filter">
+      <option value="all">All</option>
+      <option value="active">Active only</option>
+      <option value="completed">Completed only</option>
+    </select>
+    <label>Sort:</label>
+    <select id="sort">
+      <option value="personal_priority">Personal Priority</option>
+      <option value="linear_priority">Linear Priority</option>
+      <option value="linear_status">Linear Status</option>
+      <option value="updated_at">Last Updated</option>
+    </select>
+    <label>Search:</label>
+    <input type="text" id="search" placeholder="Title or notes...">
+  </div>
+
+  <div id="error" class="error" style="display: none;"></div>
+  <div id="loading" class="loading" style="display: none;">Loading…</div>
+  <div id="empty" class="empty" style="display: none;">No issues match filters.</div>
+  <table id="issues-table" style="display: none;">
+    <thead>
+      <tr>
+        <th>Issue</th>
+        <th>Linear status</th>
+        <th>Linear priority</th>
+        <th>Personal priority</th>
+        <th>Personal status</th>
+        <th>Notes</th>
+        <th>Team</th>
+        <th>Updated</th>
+      </tr>
+    </thead>
+    <tbody id="issues-body"></tbody>
+  </table>
+
+  <div class="modal-overlay" id="modal">
+    <div class="modal">
+      <h2 id="modal-title">Edit overlay</h2>
+      <div class="field">
+        <label>Notes</label>
+        <textarea id="modal-notes" placeholder="Private notes..."></textarea>
+      </div>
+      <div class="field">
+        <label>Personal priority</label>
+        <select id="modal-personal-priority">
+          <option value="">Not set</option>
+          <option value="1">1 (highest)</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+          <option value="4">4</option>
+          <option value="5">5 (lowest)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Personal status</label>
+        <select id="modal-personal-status"></select>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="modal-cancel">Cancel</button>
+        <button type="button" id="modal-save" class="primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function() {
+      let allIssues = [];
+      let priorityLabels = {};
+      let personalStatusOptions = [];
+      let editingIssueId = null;
+
+      const lastFetchedEl = document.getElementById('last-fetched');
+      const refreshBtn = document.getElementById('refresh-btn');
+      const filterEl = document.getElementById('filter');
+      const sortEl = document.getElementById('sort');
+      const searchEl = document.getElementById('search');
+      const errorEl = document.getElementById('error');
+      const loadingEl = document.getElementById('loading');
+      const emptyEl = document.getElementById('empty');
+      const tableEl = document.getElementById('issues-table');
+      const tbody = document.getElementById('issues-body');
+      const modalEl = document.getElementById('modal');
+      const modalTitle = document.getElementById('modal-title');
+      const modalNotes = document.getElementById('modal-notes');
+      const modalPersonalPriority = document.getElementById('modal-personal-priority');
+      const modalPersonalStatus = document.getElementById('modal-personal-status');
+      const modalCancel = document.getElementById('modal-cancel');
+      const modalSave = document.getElementById('modal-save');
+
+      function showError(msg) {
+        errorEl.textContent = msg;
+        errorEl.style.display = 'block';
+      }
+      function hideError() {
+        errorEl.style.display = 'none';
+      }
+      function setLoading(on) {
+        loadingEl.style.display = on ? 'block' : 'none';
+        if (!on) tableEl.style.display = 'table';
+      }
+
+      function formatDate(iso) {
+        if (!iso) return '—';
+        try {
+          const d = new Date(iso);
+          return d.toLocaleDateString(undefined, { dateStyle: 'short' });
+        } catch (_) { return iso; }
+      }
+
+      function linearPriorityLabel(p) {
+        return priorityLabels[p] != null ? priorityLabels[p] : '—';
+      }
+
+      function filteredAndSortedIssues() {
+        const filterVal = filterEl.value;
+        const sortVal = sortEl.value;
+        const q = (searchEl.value || '').trim().toLowerCase();
+        let list = allIssues.filter(function(issue) {
+          if (filterVal === 'active' && issue.is_completed) return false;
+          if (filterVal === 'completed' && !issue.is_completed) return false;
+          if (q) {
+            const title = (issue.title || '').toLowerCase();
+            const notes = (issue.notes || '').toLowerCase();
+            if (!title.includes(q) && !notes.includes(q)) return false;
+          }
+          return true;
+        });
+        list.sort(function(a, b) {
+          if (sortVal === 'personal_priority') {
+            const pa = a.personal_priority != null ? a.personal_priority : 99;
+            const pb = b.personal_priority != null ? b.personal_priority : 99;
+            return pa - pb;
+          }
+          if (sortVal === 'linear_priority') return (a.linear_priority || 0) - (b.linear_priority || 0);
+          if (sortVal === 'linear_status') return (a.linear_status || '').localeCompare(b.linear_status || '');
+          if (sortVal === 'updated_at') return (b.updated_at || '').localeCompare(a.updated_at || '');
+          return 0;
+        });
+        return list;
+      }
+
+      function renderTable() {
+        const list = filteredAndSortedIssues();
+        tbody.innerHTML = '';
+        if (list.length === 0) {
+          emptyEl.style.display = 'block';
+          tableEl.style.display = 'none';
+          return;
+        }
+        emptyEl.style.display = 'none';
+        list.forEach(function(issue) {
+          const tr = document.createElement('tr');
+          if (issue.is_completed) tr.classList.add('completed');
+          const notesFirstLine = (issue.notes || '').split('\n')[0].trim();
+          const notesPreview = notesFirstLine ? notesFirstLine.substring(0, 60) + (notesFirstLine.length > 60 ? '…' : '') : '';
+          const priorityClass = 'priority-' + (issue.linear_priority != null ? issue.linear_priority : 0);
+          tr.innerHTML =
+            '<td><a href="' + (issue.url || '#') + '" target="_blank" rel="noopener">' + escapeHtml(issue.identifier || issue.id) + ': ' + escapeHtml(issue.title || '') + '</a></td>' +
+            '<td>' + escapeHtml(issue.linear_status || '—') + '</td>' +
+            '<td><span class="badge ' + priorityClass + '">' + escapeHtml(linearPriorityLabel(issue.linear_priority)) + '</span></td>' +
+            '<td>' + (issue.personal_priority != null && issue.personal_priority !== '' ? issue.personal_priority : 'Not set') + '</td>' +
+            '<td>' + escapeHtml(issue.personal_status || 'No status') + '</td>' +
+            '<td><span class="notes-preview ' + (notesPreview ? '' : 'empty') + '" data-issue-id="' + escapeHtml(issue.identifier || issue.id) + '">' + (notesPreview || 'Add notes…') + '</span></td>' +
+            '<td>' + escapeHtml(issue.team_name || '—') + '</td>' +
+            '<td>' + formatDate(issue.updated_at) + '</td>';
+          tbody.appendChild(tr);
+        });
+        tbody.querySelectorAll('.notes-preview').forEach(function(el) {
+          el.addEventListener('click', function() {
+            openModal(el.getAttribute('data-issue-id'));
+          });
+        });
+      }
+
+      function escapeHtml(s) {
+        if (s == null) return '';
+        const div = document.createElement('div');
+        div.textContent = s;
+        return div.innerHTML;
+      }
+
+      function openModal(issueId) {
+        const issue = allIssues.find(function(i) { return (i.identifier || i.id) === issueId; });
+        if (!issue) return;
+        editingIssueId = issueId;
+        modalTitle.textContent = (issue.identifier || issueId) + ': ' + (issue.title || '');
+        modalNotes.value = issue.notes || '';
+        modalPersonalPriority.value = issue.personal_priority != null && issue.personal_priority !== '' ? String(issue.personal_priority) : '';
+        modalPersonalStatus.value = issue.personal_status || '';
+        modalEl.classList.add('open');
+      }
+
+      function closeModal() {
+        modalEl.classList.remove('open');
+        editingIssueId = null;
+      }
+
+      function loadMeta() {
+        fetch('/api/priority-labels').then(function(r) { return r.json(); }).then(function(labels) {
+          priorityLabels = labels;
+        }).catch(function() {});
+        fetch('/api/personal-status-options').then(function(r) { return r.json(); }).then(function(opts) {
+          personalStatusOptions = opts || [];
+          modalPersonalStatus.innerHTML = personalStatusOptions.map(function(o) {
+            return '<option value="' + escapeHtml(o) + '">' + escapeHtml(o || 'No status') + '</option>';
+          }).join('');
+        }).catch(function() {});
+      }
+
+      function loadIssues(isRefresh) {
+        hideError();
+        setLoading(true);
+        const url = isRefresh ? '/api/refresh' : '/api/issues';
+        const method = isRefresh ? 'POST' : 'GET';
+        fetch(url, method === 'POST' ? { method: 'POST' } : {})
+          .then(function(r) {
+            if (!r.ok) return r.json().then(function(d) { throw new Error(d.error || r.statusText); });
+            return r.json();
+          })
+          .then(function(data) {
+            if (data.error) throw new Error(data.error);
+            allIssues = data.issues || [];
+            if (data.last_fetched) lastFetchedEl.textContent = 'Last fetched: ' + formatDate(data.last_fetched);
+            renderTable();
+          })
+          .catch(function(err) {
+            showError(err.message || 'Failed to load issues');
+            tableEl.style.display = 'none';
+            emptyEl.style.display = 'none';
+          })
+          .finally(function() { setLoading(false); });
+      }
+
+      function saveOverlay() {
+        if (!editingIssueId) return;
+        const payload = {
+          notes: modalNotes.value,
+          personal_status: modalPersonalStatus.value,
+          personal_priority: modalPersonalPriority.value === '' ? null : parseInt(modalPersonalPriority.value, 10)
+        };
+        if (payload.personal_priority === NaN) payload.personal_priority = null;
+        fetch('/api/overlay/' + encodeURIComponent(editingIssueId), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        })
+          .then(function(r) { return r.json(); })
+          .then(function(data) {
+            if (data.error) throw new Error(data.error);
+            var issue = allIssues.find(function(i) { return (i.identifier || i.id) === editingIssueId; });
+            if (issue) {
+              issue.notes = payload.notes;
+              issue.personal_status = payload.personal_status;
+              issue.personal_priority = payload.personal_priority;
+              if (data.entry && data.entry.last_updated) issue.last_updated = data.entry.last_updated;
+            }
+            closeModal();
+            renderTable();
+          })
+          .catch(function(err) { showError(err.message || 'Failed to save'); });
+      }
+
+      refreshBtn.addEventListener('click', function() { loadIssues(true); });
+      filterEl.addEventListener('change', renderTable);
+      sortEl.addEventListener('change', renderTable);
+      searchEl.addEventListener('input', renderTable);
+      modalCancel.addEventListener('click', closeModal);
+      modalSave.addEventListener('click', saveOverlay);
+      modalEl.addEventListener('click', function(e) {
+        if (e.target === modalEl) closeModal();
+      });
+
+      loadMeta();
+      loadIssues(false);
+    })();
+  </script>
+</body>
+</html>
