@@ -3,7 +3,9 @@ Sidecar — A personal overlay dashboard for Linear tickets.
 Flask backend: read-only Linear API, local overlay.json for notes/priority/status.
 """
 
+import copy
 import json
+import logging
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -42,6 +44,8 @@ PERSONAL_STATUS_OPTIONS = [
     "In Progress",
     "Blocked",
     "Waiting On Someone",
+    "Waiting On Me",
+    "Waiting On Review",
     "Ready to Close",
 ]
 
@@ -195,14 +199,29 @@ def fetch_linear_issues():
 
 
 def read_overlay():
-    """Return overlay dict (issue_id -> overlay entry). Empty dict if file missing."""
+    """Return overlay dict (issue_id -> overlay entry). Empty dict if file missing.
+    Resolves priority conflicts on load; if fixed, logs a warning and writes back."""
     if not OVERLAY_PATH.exists():
         return {}
     try:
         with open(OVERLAY_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
+            raw = json.load(f)
     except (json.JSONDecodeError, OSError):
         return {}
+    resolved = resolve_priority_conflicts(raw)
+    if resolved != raw:
+        logging.warning(
+            "Overlay had duplicate personal_priority values; auto-resolved and rewrote overlay.json"
+        )
+        write_overlay(resolved)
+        return resolved
+    return raw
+
+
+def write_overlay(overlay):
+    """Write the entire overlay dict to overlay.json in one write."""
+    with open(OVERLAY_PATH, "w", encoding="utf-8") as f:
+        json.dump(overlay, f, indent=2)
 
 
 def write_overlay_entry(issue_id, data):
@@ -230,6 +249,111 @@ def _overlay_key(issue_id):
         return None
     # If it's already an identifier (e.g. LIN-123), use it; otherwise Linear UUID is valid key too.
     return s
+
+
+def rebalance_overlay_after_assign(overlay, issue_id, new_priority):
+    """Pure: assign personal_priority N to issue_id. If N is taken, shift existing >= N down by 1.
+    Returns a new overlay dict; does not mutate input. No I/O."""
+    key = _overlay_key(issue_id)
+    if not key or new_priority is None:
+        return overlay
+    try:
+        n = int(new_priority)
+    except (TypeError, ValueError):
+        return overlay
+    if n < 1:
+        return overlay
+    out = copy.deepcopy(overlay)
+    if key not in out:
+        out[key] = {}
+    entry = out[key]
+    old_priority = entry.get("personal_priority")
+    someone_else_has_n = any(
+        k != key and (out[k].get("personal_priority")) == n
+        for k in out
+    )
+    if someone_else_has_n:
+        for k in out:
+            p = out[k].get("personal_priority")
+            if p is not None and p >= n:
+                out[k] = {**out[k], "personal_priority": p + 1}
+        out[key] = {**entry, "personal_priority": n}
+    else:
+        out[key] = {**entry, "personal_priority": n}
+        if old_priority is not None and old_priority != n:
+            for k in out:
+                if k == key:
+                    continue
+                p = out[k].get("personal_priority")
+                if p is not None and p > old_priority:
+                    out[k] = {**out[k], "personal_priority": p - 1}
+    return out
+
+
+def rebalance_overlay_after_remove(overlay, issue_id):
+    """Pure: remove personal_priority for issue_id; decrement everyone above so list stays contiguous.
+    Returns a new overlay dict; does not mutate input. No I/O."""
+    key = _overlay_key(issue_id)
+    if not key or key not in overlay:
+        return copy.deepcopy(overlay)
+    entry = overlay[key]
+    removed = entry.get("personal_priority")
+    if removed is None:
+        return copy.deepcopy(overlay)
+    out = copy.deepcopy(overlay)
+    out[key] = {k: v for k, v in entry.items() if k != "personal_priority"}
+    for k in out:
+        p = out[k].get("personal_priority")
+        if p is not None and p > removed:
+            out[k] = {**out[k], "personal_priority": p - 1}
+    return out
+
+
+def rebalance_overlay_after_remove_multiple(overlay, issue_ids):
+    """Pure: remove personal_priority for each issue_id in issue_ids and rebalance so list stays contiguous.
+    Removes in ascending order of current priority so decrements are correct. Returns a new overlay dict."""
+    keys = [_overlay_key(i) for i in issue_ids]
+    keys = [k for k in keys if k and k in overlay]
+    if not keys:
+        return copy.deepcopy(overlay)
+    # Sort by current priority (ascending) so we remove from bottom up and don't shift wrong
+    with_priority = [(k, overlay[k].get("personal_priority")) for k in keys if overlay[k].get("personal_priority") is not None]
+    with_priority.sort(key=lambda x: (x[1] or 0))
+    out = copy.deepcopy(overlay)
+    for k, _ in with_priority:
+        removed = out.get(k, {}).get("personal_priority")
+        if removed is None:
+            continue
+        out[k] = {kk: vv for kk, vv in out[k].items() if kk != "personal_priority"}
+        for kk in out:
+            p = out[kk].get("personal_priority")
+            if p is not None and p > removed:
+                out[kk] = {**out[kk], "personal_priority": p - 1}
+    return out
+
+
+def resolve_priority_conflicts(overlay):
+    """Pure: if duplicate personal_priority values exist, reassign contiguous 1,2,3 by last_updated desc.
+    Returns a new overlay dict; does not mutate input. No I/O."""
+    entries_with_priority = [
+        (k, v) for k, v in overlay.items()
+        if v.get("personal_priority") is not None
+    ]
+    if not entries_with_priority:
+        return copy.deepcopy(overlay)
+    priorities = {v.get("personal_priority") for _, v in entries_with_priority}
+    if len(priorities) == len(entries_with_priority):
+        return copy.deepcopy(overlay)
+    # Duplicates: sort by last_updated desc, reassign 1, 2, 3, ...
+    sorted_entries = sorted(
+        entries_with_priority,
+        key=lambda x: (x[1].get("last_updated") or ""),
+        reverse=True,
+    )
+    out = copy.deepcopy(overlay)
+    for i, (k, v) in enumerate(sorted_entries, 1):
+        out[k] = {**out[k], "personal_priority": i}
+    return out
 
 
 def merge_issues(linear_issues, overlay):
@@ -328,7 +452,7 @@ def sort_issues_by_cycle(issues, now_utc=None):
         if (issue.get("linear_priority")) == 1:
             urgent.append(issue)
             continue
-        if issue.get("personal_priority") is not None and 1 <= issue["personal_priority"] <= 5:
+        if issue.get("personal_priority") is not None:
             personal_priority.append(issue)
             continue
         cycle = issue.get("cycle")
@@ -373,7 +497,10 @@ def _apply_sort(issues, sort_val):
     if sort_val == "cycle":
         return sort_issues_by_cycle(issues)
     if sort_val == "personal_priority":
-        return sorted(issues, key=lambda i: (i.get("personal_priority") if i.get("personal_priority") is not None else 99))
+        ranked = [i for i in issues if i.get("personal_priority") is not None]
+        unranked = [i for i in issues if i.get("personal_priority") is None]
+        ranked.sort(key=lambda i: i.get("personal_priority"))
+        return ranked + sort_issues_by_cycle(unranked)
     if sort_val == "linear_priority":
         return sorted(issues, key=lambda i: (i.get("linear_priority") or 0))
     if sort_val == "linear_status":
@@ -400,10 +527,20 @@ def get_last_fetched():
 
 
 def refresh_cache():
-    """Force refetch from Linear, update cache, return merged issues."""
+    """Force refetch from Linear, update cache, return merged issues.
+    Completed/cancelled issues have their personal priority removed and list rebalanced (one write)."""
     global _issues_cache, _last_fetched
     linear = fetch_linear_issues()
     overlay = read_overlay()
+    completed_with_priority = [
+        issue.get("identifier") or issue.get("id")
+        for issue in linear
+        if issue.get("is_completed")
+        and (overlay.get(issue.get("identifier") or issue.get("id")) or {}).get("personal_priority") is not None
+    ]
+    if completed_with_priority:
+        overlay = rebalance_overlay_after_remove_multiple(overlay, completed_with_priority)
+        write_overlay(overlay)
     _issues_cache = merge_issues(linear, overlay)
     _last_fetched = datetime.now(timezone.utc).isoformat()
     return _issues_cache
@@ -421,7 +558,7 @@ def api_issues():
         filter_val = request.args.get("filter")
         sort_val = request.args.get("sort")
         if sort_val is None and filter_val == "active":
-            sort_val = "cycle"
+            sort_val = "personal_priority"
         issues = _apply_filter(issues, filter_val)
         issues = _apply_sort(issues, sort_val)
         last = get_last_fetched()
@@ -463,9 +600,32 @@ def api_overlay_save(issue_id):
     data = request.get_json(force=True, silent=True) or {}
     allowed = {"personal_priority", "personal_status", "notes"}
     payload = {k: data[k] for k in allowed if k in data}
+    key = _overlay_key(issue_id)
     try:
-        entry = write_overlay_entry(issue_id, payload)
-        return jsonify({"ok": True, "entry": entry})
+        overlay = read_overlay()
+        if "personal_priority" in payload:
+            pri = payload.get("personal_priority")
+            if pri is None or (isinstance(pri, str) and pri.strip() == ""):
+                new_overlay = rebalance_overlay_after_remove(overlay, issue_id)
+            else:
+                try:
+                    n = int(pri)
+                    new_overlay = rebalance_overlay_after_assign(overlay, issue_id, n)
+                except (TypeError, ValueError):
+                    new_overlay = overlay
+            for k in ("personal_status", "notes"):
+                if k in payload:
+                    if key not in new_overlay:
+                        new_overlay[key] = {}
+                    new_overlay[key][k] = payload.get(k, "" if k == "personal_status" else "")
+            new_overlay[key] = new_overlay.get(key, {})
+            new_overlay[key]["last_updated"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+            write_overlay(new_overlay)
+            entry = new_overlay[key]
+            return jsonify({"ok": True, "entry": entry, "overlay": new_overlay})
+        else:
+            entry = write_overlay_entry(issue_id, payload)
+            return jsonify({"ok": True, "entry": entry})
     except (OSError, TypeError) as e:
         return jsonify({"error": str(e)}), 500
 

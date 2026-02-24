@@ -94,16 +94,15 @@
     .priority-2 { background: var(--priority-high); color: #fff; }
     .priority-3 { background: var(--priority-medium); color: #000; }
     .priority-4 { background: var(--priority-low); color: #000; }
+    .notes-cell { cursor: pointer; }
     .notes-preview {
       max-width: 220px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      cursor: pointer;
       color: var(--text-muted);
     }
-    .notes-preview:hover { color: var(--link); text-decoration: underline; }
-    .notes-preview.empty { font-style: italic; }
+    .notes-cell:hover .notes-preview { color: var(--link); text-decoration: underline; }
     .modal-overlay {
       position: fixed;
       inset: 0;
@@ -180,8 +179,8 @@
   <div class="controls">
     <label>Sort:</label>
     <select id="sort">
-      <option value="cycle">Cycle</option>
       <option value="personal_priority">Personal Priority</option>
+      <option value="cycle">Cycle</option>
       <option value="linear_priority">Linear Priority</option>
       <option value="linear_status">Linear Status</option>
       <option value="updated_at">Last Updated</option>
@@ -202,7 +201,6 @@
         <th>Personal priority</th>
         <th>Personal status</th>
         <th>Notes</th>
-        <th>Team</th>
         <th>Linear Updated</th>
         <th>My Last Edit</th>
       </tr>
@@ -218,14 +216,9 @@
         <textarea id="modal-notes" placeholder="Private notes..."></textarea>
       </div>
       <div class="field">
-        <label>Personal priority</label>
+        <label>Personal priority (position in list)</label>
         <select id="modal-personal-priority">
           <option value="">Not set</option>
-          <option value="1">1 (highest)</option>
-          <option value="2">2</option>
-          <option value="3">3</option>
-          <option value="4">4</option>
-          <option value="5">5 (lowest)</option>
         </select>
       </div>
       <div class="field">
@@ -285,6 +278,22 @@
         } catch (_) { return iso; }
       }
 
+      function formatDateTime(iso) {
+        if (!iso) return '—';
+        try {
+          const d = new Date(iso);
+          return d.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
+        } catch (_) { return iso; }
+      }
+
+      function formatAbsoluteDate(iso) {
+        if (!iso) return '—';
+        try {
+          const d = new Date(iso);
+          return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+        } catch (_) { return iso; }
+      }
+
       function formatRelativeDate(iso) {
         if (!iso) return null;
         try {
@@ -298,8 +307,7 @@
           if (dDate.getTime() === yesterday.getTime()) return 'yesterday';
           const diffDays = Math.round((today - dDate) / (1000 * 60 * 60 * 24));
           if (diffDays > 0 && diffDays <= 7) return diffDays + ' days ago';
-          if (diffDays > 7 && diffDays <= 30) return Math.floor(diffDays / 7) + ' weeks ago';
-          return formatDate(iso);
+          return formatAbsoluteDate(iso);
         } catch (_) { return iso; }
       }
 
@@ -338,28 +346,22 @@
             '<td><span class="badge ' + priorityClass + '">' + escapeHtml(linearPriorityLabel(issue.linear_priority)) + '</span></td>' +
             '<td>' + (issue.personal_priority != null && issue.personal_priority !== '' ? issue.personal_priority : 'Not set') + '</td>' +
             '<td>' + escapeHtml(issue.personal_status || 'No status') + '</td>' +
-            '<td><span class="notes-preview ' + (notesPreview ? '' : 'empty') + '" data-issue-id="' + escapeHtml(issue.identifier || issue.id) + '">' + (notesPreview || 'Add notes…') + '</span></td>' +
-            '<td>' + escapeHtml(issue.team_name || '—') + '</td>' +
+            '<td class="notes-cell"><span class="notes-preview" data-issue-id="' + escapeHtml(issue.identifier || issue.id) + '">' + (notesPreview || 'Add notes…') + '</span></td>' +
             (function() {
               const linearUpdated = issue.updated_at;
               const rel = formatRelativeDate(linearUpdated);
-              const full = formatDate(linearUpdated);
-              const titleAttr = full ? ' title="' + escapeHtml(full) + '"' : '';
+              const tooltip = formatDateTime(linearUpdated);
+              const titleAttr = tooltip ? ' title="' + escapeHtml(tooltip) + '"' : '';
               return '<td' + titleAttr + '>' + (rel || '—') + '</td>';
             })() +
             (function() {
               const myEdit = issue.last_updated;
               if (!myEdit) return '<td>—</td>';
               const rel = formatRelativeDate(myEdit);
-              const full = formatDate(myEdit);
-              return '<td title="' + escapeHtml(full) + '">' + escapeHtml(rel) + '</td>';
+              const tooltip = formatDateTime(myEdit);
+              return '<td title="' + escapeHtml(tooltip) + '">' + escapeHtml(rel) + '</td>';
             })();
           tbody.appendChild(tr);
-        });
-        tbody.querySelectorAll('.notes-preview').forEach(function(el) {
-          el.addEventListener('click', function() {
-            openModal(el.getAttribute('data-issue-id'));
-          });
         });
       }
 
@@ -376,6 +378,15 @@
         editingIssueId = issueId;
         modalTitle.textContent = (issue.identifier || issueId) + ': ' + (issue.title || '');
         modalNotes.value = issue.notes || '';
+        var count = allIssues.filter(function(i) { return i.personal_priority != null && i.personal_priority !== ''; }).length;
+        var maxPos = Math.max(count + 1, 1);
+        modalPersonalPriority.innerHTML = '<option value="">Not set</option>';
+        for (var p = 1; p <= maxPos; p++) {
+          var opt = document.createElement('option');
+          opt.value = String(p);
+          opt.textContent = p === 1 ? '1 (first)' : (p === maxPos ? p + ' (last)' : String(p));
+          modalPersonalPriority.appendChild(opt);
+        }
         modalPersonalPriority.value = issue.personal_priority != null && issue.personal_priority !== '' ? String(issue.personal_priority) : '';
         modalPersonalStatus.value = issue.personal_status || '';
         modalEl.classList.add('open');
@@ -450,12 +461,13 @@
 
       function saveOverlay() {
         if (!editingIssueId) return;
-        const payload = {
+        var priVal = modalPersonalPriority.value;
+        var payload = {
           notes: modalNotes.value,
           personal_status: modalPersonalStatus.value,
-          personal_priority: modalPersonalPriority.value === '' ? null : parseInt(modalPersonalPriority.value, 10)
+          personal_priority: priVal === '' ? null : parseInt(priVal, 10)
         };
-        if (payload.personal_priority === NaN) payload.personal_priority = null;
+        if (payload.personal_priority !== null && isNaN(payload.personal_priority)) payload.personal_priority = null;
         fetch('/api/overlay/' + encodeURIComponent(editingIssueId), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -464,12 +476,25 @@
           .then(function(r) { return r.json(); })
           .then(function(data) {
             if (data.error) throw new Error(data.error);
-            var issue = allIssues.find(function(i) { return (i.identifier || i.id) === editingIssueId; });
-            if (issue) {
-              issue.notes = payload.notes;
-              issue.personal_status = payload.personal_status;
-              issue.personal_priority = payload.personal_priority;
-              if (data.entry && data.entry.last_updated) issue.last_updated = data.entry.last_updated;
+            if (data.overlay) {
+              Object.keys(data.overlay).forEach(function(key) {
+                var issue = allIssues.find(function(i) { return (i.identifier || i.id) === key; });
+                if (issue) {
+                  var entry = data.overlay[key];
+                  if (entry.personal_priority !== undefined) issue.personal_priority = entry.personal_priority;
+                  if (entry.personal_status !== undefined) issue.personal_status = entry.personal_status;
+                  if (entry.notes !== undefined) issue.notes = entry.notes;
+                  if (entry.last_updated !== undefined) issue.last_updated = entry.last_updated;
+                }
+              });
+            } else {
+              var issue = allIssues.find(function(i) { return (i.identifier || i.id) === editingIssueId; });
+              if (issue) {
+                issue.notes = payload.notes;
+                issue.personal_status = payload.personal_status;
+                issue.personal_priority = payload.personal_priority;
+                if (data.entry && data.entry.last_updated) issue.last_updated = data.entry.last_updated;
+              }
             }
             closeModal();
             renderTable();
@@ -484,7 +509,7 @@
         tabActiveEl.setAttribute('aria-selected', 'true');
         tabCompletedEl.classList.remove('active');
         tabCompletedEl.setAttribute('aria-selected', 'false');
-        sortEl.value = 'cycle';
+        sortEl.value = 'personal_priority';
         loadIssues(false);
       });
       tabCompletedEl.addEventListener('click', function() {
@@ -502,6 +527,24 @@
       modalSave.addEventListener('click', saveOverlay);
       modalEl.addEventListener('click', function(e) {
         if (e.target === modalEl) closeModal();
+      });
+      tbody.addEventListener('click', function(e) {
+        var y = e.clientY;
+        var x = e.clientX;
+        var rows = tbody.querySelectorAll('tr');
+        for (var i = 0; i < rows.length; i++) {
+          var tr = rows[i];
+          var trRect = tr.getBoundingClientRect();
+          if (y < trRect.top || y > trRect.bottom) continue;
+          var notesCell = tr.querySelector('.notes-cell');
+          if (!notesCell) continue;
+          var cellRect = notesCell.getBoundingClientRect();
+          if (x >= cellRect.left && x <= cellRect.right && y >= cellRect.top && y <= cellRect.bottom) {
+            var span = notesCell.querySelector('.notes-preview');
+            if (span) openModal(span.getAttribute('data-issue-id'));
+            break;
+          }
+        }
       });
 
       loadMeta();
