@@ -1,0 +1,2 @@
+# Sidecar
+Personal Linear database
