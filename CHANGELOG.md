@@ -1,3 +1,11 @@
+## v0.1.2
+
+- Merge pull request #5 from jwhittenpk/feature/Sidecar-4
+- Sidecar-4: feat: New personal statuses.  fix: inaccurate click
+- Sidecar-4: Update AGENTS.md
+- feat: ordered personal priority, remove team column, default sort, date display (#4)
+- chore: update CHANGELOG for v0.1.1
+
 ## v0.1.1
 
 - Merge pull request #4 from jwhittenpk/feature/Sidecar-3
