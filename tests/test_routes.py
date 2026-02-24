@@ -157,3 +157,71 @@ def test_get_api_issues_filter_completed_returns_only_completed(mock_linear_fetc
     assert len(issues) == 1
     assert issues[0]["identifier"] == "LIN-2"
     assert issues[0]["is_completed"] is True
+
+
+def test_post_overlay_conflicting_priority_triggers_rebalancing(temp_overlay_path, mock_linear_fetch):
+    """POST /api/overlay/<id> with a priority that another issue has triggers insert-mode rebalancing."""
+    client = app_module.app.test_client()
+    client.post(
+        "/api/overlay/LIN-1",
+        data=json.dumps({"personal_priority": 1, "notes": "first"}),
+        content_type="application/json",
+    )
+    resp = client.post(
+        "/api/overlay/LIN-2",
+        data=json.dumps({"personal_priority": 1, "notes": "new first"}),
+        content_type="application/json",
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data.get("ok") is True
+    assert data["entry"]["personal_priority"] == 1
+    assert "overlay" in data
+    assert data["overlay"]["LIN-1"]["personal_priority"] == 2
+    assert data["overlay"]["LIN-2"]["personal_priority"] == 1
+
+
+def test_post_overlay_priority_response_has_full_rebalanced_overlay(temp_overlay_path, mock_linear_fetch):
+    """Response after a priority update reflects the full rebalanced priority list."""
+    client = app_module.app.test_client()
+    client.post(
+        "/api/overlay/LIN-1",
+        data=json.dumps({"personal_priority": 1}),
+        content_type="application/json",
+    )
+    client.post(
+        "/api/overlay/LIN-2",
+        data=json.dumps({"personal_priority": 2}),
+        content_type="application/json",
+    )
+    resp = client.post(
+        "/api/overlay/LIN-3",
+        data=json.dumps({"personal_priority": 2}),
+        content_type="application/json",
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert "overlay" in data
+    overlay = data["overlay"]
+    assert overlay["LIN-3"]["personal_priority"] == 2
+    assert overlay["LIN-2"]["personal_priority"] == 3
+    assert overlay["LIN-1"]["personal_priority"] == 1
+
+
+def test_post_overlay_rebalance_writes_once(temp_overlay_path, mock_linear_fetch):
+    """When POST causes rebalancing, write_overlay is called once."""
+    from unittest.mock import patch
+    client = app_module.app.test_client()
+    client.post(
+        "/api/overlay/LIN-1",
+        data=json.dumps({"personal_priority": 1}),
+        content_type="application/json",
+    )
+    with patch.object(app_module, "write_overlay") as mock_write:
+        resp = client.post(
+            "/api/overlay/LIN-2",
+            data=json.dumps({"personal_priority": 1}),
+            content_type="application/json",
+        )
+    assert resp.status_code == 200
+    mock_write.assert_called_once()

@@ -1,6 +1,7 @@
 """Unit tests for Linear data parsing and merging logic."""
 
 import pytest
+from pathlib import Path
 from unittest.mock import patch
 
 import app as app_module
@@ -277,3 +278,47 @@ def test_fetch_all_assigned_issues_runs_without_viewer_id():
             query = call[0][1]
             assert "isMe" in query, "Linear issues query must use assignee.isMe filter"
             assert "$assigneeId" not in query, "Must not use assigneeId (use isMe instead)"
+
+
+def test_refresh_removes_priority_for_completed_and_rebalances(tmp_path):
+    """On refresh, completed issues have their personal priority removed and list is rebalanced."""
+    original_path = app_module.OVERLAY_PATH
+    try:
+        app_module.OVERLAY_PATH = tmp_path / "overlay.json"
+        app_module.write_overlay({
+            "LIN-1": {"personal_priority": 1, "notes": "a"},
+            "LIN-2": {"personal_priority": 2, "notes": "b"},
+            "LIN-3": {"personal_priority": 3, "notes": "c"},
+        })
+        linear_issues = [
+            {"id": "u1", "identifier": "LIN-1", "title": "Active", "is_completed": False},
+            {"id": "u2", "identifier": "LIN-2", "title": "Done", "is_completed": True},
+            {"id": "u3", "identifier": "LIN-3", "title": "Active2", "is_completed": False},
+        ]
+        with patch.object(app_module, "fetch_linear_issues", return_value=linear_issues):
+            app_module.refresh_cache()
+        overlay = app_module.read_overlay()
+        assert overlay.get("LIN-2", {}).get("personal_priority") is None
+        assert overlay["LIN-1"]["personal_priority"] == 1
+        assert overlay["LIN-3"]["personal_priority"] == 2
+    finally:
+        app_module.OVERLAY_PATH = original_path
+
+
+def test_personal_priority_sort_unranked_use_cycle_order():
+    """When sorted by personal_priority, issues with no priority appear after ranked, in cycle order."""
+    # Use a cycle spanning a wide range so it is "current" regardless of test run date
+    cycle = {"id": "c1", "name": "C", "number": 1, "starts_at": "2020-01-01T00:00:00Z", "ends_at": "2030-12-31T23:59:59Z"}
+    issues = [
+        _issue("LIN-noprio-todo", linear_status="Todo", personal_priority=None, cycle=cycle),
+        _issue("LIN-ranked", personal_priority=1),
+        _issue("LIN-noprio-review", linear_status="In Review", personal_priority=None, cycle=cycle),
+    ]
+    result = app_module._apply_sort(issues, "personal_priority")
+    assert result[0]["identifier"] == "LIN-ranked"
+    assert result[0]["personal_priority"] == 1
+    unranked = result[1:]
+    assert len(unranked) == 2
+    # Unranked sorted by cycle: In Review before Todo
+    assert unranked[0]["linear_status"] == "In Review"
+    assert unranked[1]["linear_status"] == "Todo"
