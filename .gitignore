@@ -127,6 +127,9 @@ celerybeat.pid
 # SageMath parsed files
 *.sage.py
 
+# Sidecar local overlay data (never commit)
+overlay.json
+
 # Environments
 .env
 .venv
