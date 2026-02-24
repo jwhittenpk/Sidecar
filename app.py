@@ -44,6 +44,8 @@ PERSONAL_STATUS_OPTIONS = [
     "In Progress",
     "Blocked",
     "Waiting On Someone",
+    "Waiting On Me",
+    "Waiting On Review",
     "Ready to Close",
 ]
 

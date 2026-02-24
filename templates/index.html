@@ -94,16 +94,15 @@
     .priority-2 { background: var(--priority-high); color: #fff; }
     .priority-3 { background: var(--priority-medium); color: #000; }
     .priority-4 { background: var(--priority-low); color: #000; }
+    .notes-cell { cursor: pointer; }
     .notes-preview {
       max-width: 220px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      cursor: pointer;
       color: var(--text-muted);
     }
-    .notes-preview:hover { color: var(--link); text-decoration: underline; }
-    .notes-preview.empty { font-style: italic; }
+    .notes-cell:hover .notes-preview { color: var(--link); text-decoration: underline; }
     .modal-overlay {
       position: fixed;
       inset: 0;
@@ -347,7 +346,7 @@
             '<td><span class="badge ' + priorityClass + '">' + escapeHtml(linearPriorityLabel(issue.linear_priority)) + '</span></td>' +
             '<td>' + (issue.personal_priority != null && issue.personal_priority !== '' ? issue.personal_priority : 'Not set') + '</td>' +
             '<td>' + escapeHtml(issue.personal_status || 'No status') + '</td>' +
-            '<td><span class="notes-preview ' + (notesPreview ? '' : 'empty') + '" data-issue-id="' + escapeHtml(issue.identifier || issue.id) + '">' + (notesPreview || 'Add notes…') + '</span></td>' +
+            '<td class="notes-cell"><span class="notes-preview" data-issue-id="' + escapeHtml(issue.identifier || issue.id) + '">' + (notesPreview || 'Add notes…') + '</span></td>' +
             (function() {
               const linearUpdated = issue.updated_at;
               const rel = formatRelativeDate(linearUpdated);
@@ -363,11 +362,6 @@
               return '<td title="' + escapeHtml(tooltip) + '">' + escapeHtml(rel) + '</td>';
             })();
           tbody.appendChild(tr);
-        });
-        tbody.querySelectorAll('.notes-preview').forEach(function(el) {
-          el.addEventListener('click', function() {
-            openModal(el.getAttribute('data-issue-id'));
-          });
         });
       }
 
@@ -533,6 +527,24 @@
       modalSave.addEventListener('click', saveOverlay);
       modalEl.addEventListener('click', function(e) {
         if (e.target === modalEl) closeModal();
+      });
+      tbody.addEventListener('click', function(e) {
+        var y = e.clientY;
+        var x = e.clientX;
+        var rows = tbody.querySelectorAll('tr');
+        for (var i = 0; i < rows.length; i++) {
+          var tr = rows[i];
+          var trRect = tr.getBoundingClientRect();
+          if (y < trRect.top || y > trRect.bottom) continue;
+          var notesCell = tr.querySelector('.notes-cell');
+          if (!notesCell) continue;
+          var cellRect = notesCell.getBoundingClientRect();
+          if (x >= cellRect.left && x <= cellRect.right && y >= cellRect.top && y <= cellRect.bottom) {
+            var span = notesCell.querySelector('.notes-preview');
+            if (span) openModal(span.getAttribute('data-issue-id'));
+            break;
+          }
+        }
       });
 
       loadMeta();
