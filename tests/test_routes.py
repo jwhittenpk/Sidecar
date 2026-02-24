@@ -127,3 +127,33 @@ def test_post_api_overlay_whitespace_issue_id_returns_400():
     )
     assert resp.status_code == 400
     assert resp.get_json().get("error") == "Invalid issue_id"
+
+
+def test_get_api_issues_filter_active_returns_only_non_completed(mock_linear_fetch):
+    """GET /api/issues?filter=active returns only issues with is_completed false."""
+    mock_linear_fetch.return_value = [
+        {"id": "u1", "identifier": "LIN-1", "title": "Active", "linear_priority": 2, "is_completed": False},
+        {"id": "u2", "identifier": "LIN-2", "title": "Done", "linear_priority": 2, "is_completed": True},
+    ]
+    client = app_module.app.test_client()
+    resp = client.get("/api/issues?filter=active")
+    assert resp.status_code == 200
+    issues = resp.get_json()["issues"]
+    assert len(issues) == 1
+    assert issues[0]["identifier"] == "LIN-1"
+    assert issues[0]["is_completed"] is False
+
+
+def test_get_api_issues_filter_completed_returns_only_completed(mock_linear_fetch):
+    """GET /api/issues?filter=completed returns only completed/cancelled issues."""
+    mock_linear_fetch.return_value = [
+        {"id": "u1", "identifier": "LIN-1", "title": "Active", "linear_priority": 2, "is_completed": False},
+        {"id": "u2", "identifier": "LIN-2", "title": "Done", "linear_priority": 2, "is_completed": True},
+    ]
+    client = app_module.app.test_client()
+    resp = client.get("/api/issues?filter=completed")
+    assert resp.status_code == 200
+    issues = resp.get_json()["issues"]
+    assert len(issues) == 1
+    assert issues[0]["identifier"] == "LIN-2"
+    assert issues[0]["is_completed"] is True

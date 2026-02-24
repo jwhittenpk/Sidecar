@@ -84,3 +84,25 @@ def test_merge_with_partial_overlay_entry():
     assert merged[0]["notes"] == "Only notes"
     assert merged[0]["personal_priority"] is None
     assert merged[0]["personal_status"] == ""
+
+
+def test_merge_without_overlay_has_last_updated_none():
+    """My Last Edit column shows '—' when no overlay entry exists (last_updated is None)."""
+    linear_issues = [
+        {"id": "uuid-1", "identifier": "LIN-1", "title": "Foo", "linear_status": "Todo"}
+    ]
+    overlay = {}
+    merged = app_module.merge_issues(linear_issues, overlay)
+    assert len(merged) == 1
+    assert merged[0]["last_updated"] is None
+
+
+def test_merge_with_overlay_has_last_updated():
+    """My Last Edit reflects last_updated from overlay.json when it exists."""
+    linear_issues = [
+        {"id": "uuid-1", "identifier": "LIN-1", "title": "Foo"}
+    ]
+    overlay = {"LIN-1": {"notes": "Note", "last_updated": "2025-02-15T14:30:00"}}
+    merged = app_module.merge_issues(linear_issues, overlay)
+    assert len(merged) == 1
+    assert merged[0]["last_updated"] == "2025-02-15T14:30:00"
