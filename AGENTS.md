@@ -29,13 +29,13 @@ This file is for AI coding agents (e.g. Cursor) working on this codebase.
 
 ## Branch naming
 
-- Use `feature/Sidecar-###` where `###` is the GitHub issue number (e.g. `feature/Sidecar-12`).
+- Use `feature/Sidecar-###` where `###` is the GitHub issue number or the next PR number (e.g. `feature/Sidecar-12`).
 - Branch from `main`.
 
 ## Commit and PR format
 
-- **Commit message:** `type: short description (#issue-number)`  
-  Examples: `feat: add review mode (#12)`, `fix: overlay not saving on refresh (#7)`, `chore: add pytest to requirements (#3)`.  
+- **Commit message:** `(#branch-name) type: short description`  
+  Examples: `Sidecar-12: feat: add review mode`, `Sidecar-7: fix: overlay not saving on refresh`, `Sidecar-3: chore: add pytest to requirements`.  
   Types: `feat`, `fix`, `chore`, `docs`, `test`, `refactor`.
 - **PR title:** Same format as commit messages; reference the issue number.
 
