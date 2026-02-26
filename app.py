@@ -830,9 +830,20 @@ def refresh_cache():
     return _issues_cache
 
 
+def _get_version():
+    """Return version string from VERSION file, or empty string if missing."""
+    version_path = Path(__file__).parent / "VERSION"
+    if version_path.exists():
+        try:
+            return version_path.read_text(encoding="utf-8").strip()
+        except OSError:
+            pass
+    return ""
+
+
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", version=_get_version())
 
 
 @app.route("/api/issues", methods=["GET"])
