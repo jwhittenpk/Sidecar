@@ -20,6 +20,9 @@
       --status-teal: #39c5cf;
       --status-purple: #a371f7;
       --status-amber: #d29922;
+      --status-light-gray: #9ca3af;
+      --status-desaturated-blue: #5b7c9a;
+      --status-dark-red: #8b2e2e;
     }
     * { box-sizing: border-box; }
     body {
@@ -97,15 +100,15 @@
     .priority-2 { background: var(--priority-high); color: #fff; }
     .priority-3 { background: var(--priority-medium); color: #000; }
     .priority-4 { background: var(--priority-low); color: #000; }
-    .badge.personal-status-none { background: var(--priority-none); color: var(--bg); }
-    .badge.personal-status-not-started { background: var(--text-muted); color: var(--bg); }
+    .badge.personal-status-none { background: var(--status-light-gray); color: var(--bg); }
+    .badge.personal-status-not-started { background: var(--status-desaturated-blue); color: #fff; }
     .badge.personal-status-in-progress { background: var(--link); color: #fff; }
     .badge.personal-status-testing { background: var(--status-teal); color: #000; }
     .badge.personal-status-pair-testing { background: var(--status-purple); color: #fff; }
     .badge.personal-status-waiting-on-testing { background: var(--status-amber); color: #000; }
     .badge.personal-status-waiting-on-someone { background: var(--status-amber); color: #000; }
-    .badge.personal-status-waiting-on-me { background: var(--text-muted); color: var(--bg); }
-    .badge.personal-status-waiting-on-review { background: var(--text-muted); color: var(--bg); }
+    .badge.personal-status-waiting-on-me { background: var(--status-dark-red); color: #fff; }
+    .badge.personal-status-waiting-on-review { background: var(--priority-low); color: #000; }
     .badge.personal-status-blocked { background: var(--priority-urgent); color: #fff; }
     .badge.personal-status-ready-to-close { background: var(--priority-low); color: #000; }
     .notes-cell { cursor: pointer; }
