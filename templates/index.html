@@ -226,8 +226,7 @@
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
       </button>
       <span class="filter-badge" id="filter-badge" aria-hidden="true"></span>
-    </div>
-    <div class="filter-popover" id="filter-popover">
+      <div class="filter-popover" id="filter-popover">
       <div class="filter-section">
         <label>Linear Updated — From</label>
         <input type="date" id="filter-date-from">
@@ -260,17 +259,8 @@
         <button type="button" id="filter-clear">Clear All</button>
         <button type="button" id="filter-apply" class="primary">Apply</button>
       </div>
+      </div>
     </div>
-    <label>Sort:</label>
-    <select id="sort">
-      <option value="personal_priority">Personal Priority</option>
-      <option value="cycle">Cycle</option>
-      <option value="linear_priority">Linear Priority</option>
-      <option value="linear_status">Linear Status</option>
-      <option value="updated_at">Linear Updated</option>
-      <option value="personal_status">Personal Status</option>
-      <option value="last_updated">My Last Edit</option>
-    </select>
     <label>Search:</label>
     <input type="text" id="search" placeholder="Title or notes...">
   </div>
@@ -339,7 +329,6 @@
       const refreshBtn = document.getElementById('refresh-btn');
       const tabActiveEl = document.getElementById('tab-active');
       const tabCompletedEl = document.getElementById('tab-completed');
-      const sortEl = document.getElementById('sort');
       const searchEl = document.getElementById('search');
       const errorEl = document.getElementById('error');
       const loadingEl = document.getElementById('loading');
@@ -685,17 +674,14 @@
         hideError();
         setLoading(true);
         const filter = getFilter();
-        const sort = sortEl.value;
-        let apiUrl = '/api/issues?filter=' + encodeURIComponent(filter) + '&sort=' + encodeURIComponent(sort);
-        if (sort === 'last_updated') apiUrl += '&sort_dir=desc';
+        let apiUrl = '/api/issues?filter=' + encodeURIComponent(filter) + '&sort=' + encodeURIComponent(sortColumn);
+        if (sortColumn === 'last_updated') apiUrl += '&sort_dir=' + encodeURIComponent(sortDir);
         apiUrl += buildFilterQueryString(filterConfig);
         function onData(data) {
           if (data.error) throw new Error(data.error);
           allIssues = data.issues || [];
           if (data.last_fetched) lastFetchedEl.textContent = 'Last fetched: ' + formatDate(data.last_fetched);
-          sortColumn = sortEl.value;
-          sortDir = 'asc';
-          if (sortColumn === 'updated_at' || sortColumn === 'last_updated') sortDir = 'desc';
+          sortDir = (sortColumn === 'updated_at' || sortColumn === 'last_updated') ? 'desc' : 'asc';
           updateFilterBadge();
           updateSortIndicators();
           renderTable();
@@ -804,7 +790,8 @@
         tabActiveEl.setAttribute('aria-selected', 'true');
         tabCompletedEl.classList.remove('active');
         tabCompletedEl.setAttribute('aria-selected', 'false');
-        sortEl.value = 'personal_priority';
+        sortColumn = 'personal_priority';
+        sortDir = 'asc';
         loadIssues(false);
       });
       tabCompletedEl.addEventListener('click', function() {
@@ -813,10 +800,10 @@
         tabCompletedEl.setAttribute('aria-selected', 'true');
         tabActiveEl.classList.remove('active');
         tabActiveEl.setAttribute('aria-selected', 'false');
-        sortEl.value = 'updated_at';
+        sortColumn = 'updated_at';
+        sortDir = 'desc';
         loadIssues(false);
       });
-      sortEl.addEventListener('change', function() { loadIssues(false); });
       searchEl.addEventListener('input', renderTable);
       document.querySelectorAll('.th-sortable').forEach(function(th) {
         th.addEventListener('click', function() {
@@ -824,7 +811,6 @@
           if (!col) return;
           if (sortColumn === col) sortDir = sortDir === 'asc' ? 'desc' : 'asc';
           else { sortColumn = col; sortDir = 'asc'; if (col === 'updated_at' || col === 'last_updated') sortDir = 'desc'; }
-          sortEl.value = sortColumn;
           updateSortIndicators();
           renderTable();
         });
