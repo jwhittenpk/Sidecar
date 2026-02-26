@@ -585,7 +585,8 @@
         modalTitle.textContent = (issue.identifier || issueId) + ': ' + (issue.title || '');
         modalNotes.value = issue.notes || '';
         var count = allIssues.filter(function(i) { return i.personal_priority != null && i.personal_priority !== ''; }).length;
-        var maxPos = Math.max(count + 1, 1);
+        var hasPriority = issue.personal_priority != null && issue.personal_priority !== '';
+        var maxPos = hasPriority ? Math.max(count, 1) : Math.max(count + 1, 1);
         modalPersonalPriority.innerHTML = '<option value="">Not set</option>';
         for (var p = 1; p <= maxPos; p++) {
           var opt = document.createElement('option');
@@ -1110,10 +1111,12 @@
                 var issue = allIssues.find(function(i) { return (i.identifier || i.id) === key; });
                 if (issue) {
                   var entry = data.overlay[key];
-                  if (entry.personal_priority !== undefined) issue.personal_priority = entry.personal_priority;
-                  if (entry.personal_status !== undefined) issue.personal_status = entry.personal_status;
-                  if (entry.notes !== undefined) issue.notes = entry.notes;
-                  if (entry.last_updated !== undefined) issue.last_updated = entry.last_updated;
+                  if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
+                    issue.personal_priority = entry.hasOwnProperty('personal_priority') ? entry.personal_priority : undefined;
+                    if (entry.personal_status !== undefined) issue.personal_status = entry.personal_status;
+                    if (entry.notes !== undefined) issue.notes = entry.notes;
+                    if (entry.last_updated !== undefined) issue.last_updated = entry.last_updated;
+                  }
                 }
               });
             } else {

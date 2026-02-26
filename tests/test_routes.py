@@ -227,6 +227,55 @@ def test_post_overlay_rebalance_writes_once(temp_overlay_path, mock_linear_fetch
     mock_write.assert_called_once()
 
 
+def test_post_overlay_move_to_last_does_not_push_down(temp_overlay_path, mock_linear_fetch):
+    """Moving an issue to last position (e.g. 4 to 9) via API produces contiguous 1..9, not 10."""
+    mock_linear_fetch.return_value = [
+        {"id": f"u{i}", "identifier": f"LIN-{i}", "title": f"Issue {i}", "linear_priority": 2, "linear_status": "X", "is_completed": False}
+        for i in range(1, 10)
+    ]
+    overlay = {f"LIN-{i}": {"personal_priority": i, "notes": ""} for i in range(1, 10)}
+    temp_overlay_path.write_text(json.dumps(overlay))
+    client = app_module.app.test_client()
+    resp = client.post(
+        "/api/overlay/LIN-4",
+        data=json.dumps({"personal_priority": 9}),
+        content_type="application/json",
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    ov = data["overlay"]
+    assert ov["LIN-4"]["personal_priority"] == 9
+    priorities = [ov[k]["personal_priority"] for k in ov if k.startswith("LIN-") and ov[k].get("personal_priority") is not None]
+    assert sorted(priorities) == list(range(1, 10))
+    assert max(priorities) == 9
+
+
+def test_post_overlay_invalidates_cache_so_get_issues_sees_update(temp_overlay_path, mock_linear_fetch):
+    """After POST /api/overlay saves a change, next GET /api/issues returns fresh data (cache invalidated)."""
+    mock_linear_fetch.return_value = [
+        {"id": "u1", "identifier": "LIN-1", "title": "One", "linear_priority": 2, "linear_status": "X", "is_completed": False},
+        {"id": "u2", "identifier": "LIN-2", "title": "Two", "linear_priority": 2, "linear_status": "X", "is_completed": False},
+    ]
+    temp_overlay_path.write_text(json.dumps({"LIN-1": {"personal_priority": 1}}))
+    client = app_module.app.test_client()
+    # Populate cache
+    client.get("/api/issues")
+    # Change overlay: remove LIN-1's priority
+    resp = client.post(
+        "/api/overlay/LIN-1",
+        data=json.dumps({"personal_priority": None}),
+        content_type="application/json",
+    )
+    assert resp.status_code == 200
+    # Next GET must re-read overlay from disk (cache was invalidated), so LIN-1 has no priority
+    get_resp = client.get("/api/issues")
+    assert get_resp.status_code == 200
+    issues = get_resp.get_json()["issues"]
+    lin1 = next((i for i in issues if i.get("identifier") == "LIN-1"), None)
+    assert lin1 is not None
+    assert lin1.get("personal_priority") is None
+
+
 # --- apply_issue_filters and API filter param tests ---
 
 def _merged_issues_fixture():
