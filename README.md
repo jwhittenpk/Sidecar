@@ -13,11 +13,13 @@ A lightweight, locally-run personal dashboard for software engineers who use [Li
 ## Features
 
 - **Sync with Linear** — Fetches issues assigned to you (active + completed/cancelled in the last 6 months) via the Linear GraphQL API (read-only).
-- **Personal priority** — Assign your own priority (1–5) per ticket, independent of Linear’s priority.
-- **Personal status** — Track “In Progress”, “Blocked”, “Waiting On Someone”, “Ready to Close”, etc.
+- **Personal priority** — Ordered list (1–n) per ticket, independent of Linear’s priority; reorder by moving items (shift up/down), add at end, or clear to “Not set”; list stays contiguous.
+- **Personal status** — Track “In Progress”, “Blocked”, “Waiting On Someone”, “Ready to Close”, “Testing”, “Pair Testing”, “Waiting on Testing”, etc., with distinct badge colors.
 - **Private notes** — Add notes like “waiting on backend” or “blocked by X”; stored only in a local JSON file.
+- **Customizable columns** — Show/hide optional columns (Cycle, Team, Labels, Notes, Linear/Personal priority, status, dates); column order and visibility persisted in overlay.
+- **Filter & sort** — Filter by All / Active only / Completed only; filter by visible columns (status, priority, cycle, team, labels, date range); sort by any visible column; search by title or notes.
 - **Completed tickets** — View closed/cancelled tickets with all your notes for performance reviews or follow-ups.
-- **Filter & sort** — Filter by All / Active only / Completed only; sort by personal priority, Linear priority, status, or last updated; search by title or notes.
+- **Version in header** — App version (e.g. v0.2.0) shown in the dashboard header.
 
 ---
 
@@ -77,12 +79,13 @@ Never commit `.env` or share your token; it has access to your Linear data.
 
 | Path | Description |
 |------|-------------|
-| `app.py` | Flask app: routes, Linear API client, overlay read/write, merge logic |
-| `overlay.json` | Local file storing your notes, personal priority, and personal status (created on first save; do not commit) |
 | `.env` | Your Linear API key (do not commit) |
+| `.env.example` | Example env file; copy to `.env` and add your key |
+| `.github/workflows/` | CI: tests on PRs, release + CHANGELOG on push to main |
+| `app.py` | Flask app: routes, Linear API client, overlay read/write, merge logic |
+| `overlay.json` | Local file storing notes, personal priority, status, column preferences (created on first save; do not commit) |
 | `templates/index.html` | Single-page dashboard UI (HTML + embedded CSS and JS) |
 | `tests/` | Unit tests for routes, overlay, and Linear parsing |
-| `.github/workflows/` | CI: tests on PRs, release + CHANGELOG on push to main |
 
 ---
 

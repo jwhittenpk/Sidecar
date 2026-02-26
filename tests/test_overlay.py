@@ -220,6 +220,28 @@ def test_change_existing_priority_rebalances():
     assert result["LIN-2"]["personal_priority"] == 3
 
 
+def test_move_to_last_remove_then_assign_keeps_contiguous():
+    """Moving an issue from position K to last (e.g. 4 to 9) should shift 5..9 up to 4..8, not push 9 to 10."""
+    overlay = {
+        "LIN-1": {"personal_priority": 1, "notes": "a"},
+        "LIN-2": {"personal_priority": 2, "notes": "b"},
+        "LIN-3": {"personal_priority": 3, "notes": "c"},
+        "LIN-4": {"personal_priority": 4, "notes": "d"},
+        "LIN-5": {"personal_priority": 5, "notes": "e"},
+        "LIN-6": {"personal_priority": 6, "notes": "f"},
+        "LIN-7": {"personal_priority": 7, "notes": "g"},
+        "LIN-8": {"personal_priority": 8, "notes": "h"},
+        "LIN-9": {"personal_priority": 9, "notes": "i"},
+    }
+    # API does remove-then-assign: first remove LIN-4 (4..9 become 3..8), then assign 9 to LIN-4
+    after_remove = app_module.rebalance_overlay_after_remove(overlay, "LIN-4")
+    result = app_module.rebalance_overlay_after_assign(after_remove, "LIN-4", 9)
+    assert result["LIN-4"]["personal_priority"] == 9
+    priorities = [result[k]["personal_priority"] for k in result if result[k].get("personal_priority") is not None]
+    assert sorted(priorities) == list(range(1, 10)), "should be contiguous 1..9 with no 10"
+    assert max(priorities) == 9
+
+
 # --- column_preferences in overlay.json ---
 
 
