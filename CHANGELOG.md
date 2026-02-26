@@ -1,3 +1,11 @@
+## v0.2.0
+
+- Merge pull request #9 from jwhittenpk/feature/Sidecar-8
+- Sidecar-8: show version in header (vX.Y.Z), move gear to right
+- Sidecar-8: feat: column reorder, preferences persistence, filter popover updates
+- Sidecar-8: feat: Customizable columns
+- chore: update CHANGELOG for v0.1.5
+
 ## v0.1.5
 
 - Merge pull request #8 from jwhittenpk/feature/Sidecar-7
