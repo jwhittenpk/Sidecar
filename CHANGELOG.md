@@ -1,3 +1,10 @@
+## v0.1.3
+
+- Merge pull request #6 from jwhittenpk/feature/Sidecar-5
+- Sidecar-6: Remove sort dropdown.  Fix filter button.
+- Sidecar-5: feat: filter popover, filter options, sortable column headers
+- chore: update CHANGELOG for v0.1.2
+
 ## v0.1.2
 
 - Merge pull request #5 from jwhittenpk/feature/Sidecar-4
