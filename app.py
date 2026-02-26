@@ -57,8 +57,9 @@ CYCLE_STATUS_ORDER = ["In Review", "In Progress", "Todo"]
 # Linear priority sort within status: High(2) → Medium(3) → Low(4) → No priority(0)
 LINEAR_PRIORITY_SORT_ORDER = {2: 0, 3: 1, 4: 2, 0: 3}
 
-# Reserved top-level key in overlay.json for column visibility (not an issue entry)
-COLUMN_VISIBILITY_KEY = "column_visibility"
+# Reserved top-level keys in overlay.json (not issue entries)
+COLUMN_VISIBILITY_KEY = "column_visibility"  # legacy; migrated to column_preferences
+COLUMN_PREFERENCES_KEY = "column_preferences"
 
 # Single source of truth for all columns. Sort/filter types and linear_field per spec.
 COLUMN_REGISTRY = [
@@ -75,6 +76,8 @@ COLUMN_REGISTRY = [
     {"id": "team", "label": "Team", "default_visible": False, "sortable": True, "sort_type": "alpha", "filterable": True, "filter_type": "multiselect", "linear_field": "team.name"},
     {"id": "labels", "label": "Labels", "default_visible": False, "sortable": True, "sort_type": "alpha", "filterable": True, "filter_type": "multiselect", "linear_field": "labels"},
 ]
+DEFAULT_COLUMN_ORDER = [c["id"] for c in COLUMN_REGISTRY]
+_REGISTRY_IDS = frozenset(c["id"] for c in COLUMN_REGISTRY)
 
 
 def get_linear_token():
@@ -262,9 +265,56 @@ def get_column_visibility():
 
 
 def write_column_visibility(visibility_dict):
-    """Write column_visibility to overlay.json; preserves all other overlay keys."""
+    """Write column_visibility to overlay.json; preserves all other overlay keys. Legacy; prefer write_column_preferences."""
     overlay = read_overlay()
     overlay[COLUMN_VISIBILITY_KEY] = dict(visibility_dict)
+    write_overlay(overlay)
+
+
+def _valid_column_order(order):
+    """Return True if order is a list containing every registry ID exactly once."""
+    if not isinstance(order, list) or len(order) != len(_REGISTRY_IDS):
+        return False
+    return set(order) == _REGISTRY_IDS
+
+
+def get_column_preferences():
+    """Return { order: [...], visibility: {...} } from overlay. Migrates from column_visibility if needed."""
+    overlay = read_overlay()
+    prefs = overlay.get(COLUMN_PREFERENCES_KEY)
+    if isinstance(prefs, dict):
+        order = prefs.get("order")
+        vis = prefs.get("visibility")
+        if isinstance(order, list) and isinstance(vis, dict):
+            if _valid_column_order(order):
+                default_vis = {c["id"]: c["default_visible"] for c in COLUMN_REGISTRY}
+                merged_vis = {**default_vis, **{k: bool(v) for k, v in vis.items() if k in default_vis}}
+                return {"order": list(order), "visibility": merged_vis}
+    # Legacy migration
+    leg = overlay.get(COLUMN_VISIBILITY_KEY)
+    if isinstance(leg, dict):
+        default_vis = {c["id"]: c["default_visible"] for c in COLUMN_REGISTRY}
+        merged_vis = {**default_vis, **{k: bool(v) for k, v in leg.items() if k in default_vis}}
+        new_prefs = {"order": list(DEFAULT_COLUMN_ORDER), "visibility": merged_vis}
+        overlay = read_overlay()
+        overlay[COLUMN_PREFERENCES_KEY] = new_prefs
+        if COLUMN_VISIBILITY_KEY in overlay:
+            del overlay[COLUMN_VISIBILITY_KEY]
+        write_overlay(overlay)
+        return {"order": new_prefs["order"], "visibility": new_prefs["visibility"]}
+    # Missing: return defaults
+    return {
+        "order": list(DEFAULT_COLUMN_ORDER),
+        "visibility": {c["id"]: c["default_visible"] for c in COLUMN_REGISTRY},
+    }
+
+
+def write_column_preferences(order_list, visibility_dict):
+    """Write column_preferences to overlay.json; preserves all other overlay keys. Removes legacy column_visibility."""
+    overlay = read_overlay()
+    overlay[COLUMN_PREFERENCES_KEY] = {"order": list(order_list), "visibility": dict(visibility_dict)}
+    if COLUMN_VISIBILITY_KEY in overlay:
+        del overlay[COLUMN_VISIBILITY_KEY]
     write_overlay(overlay)
 
 
@@ -312,13 +362,14 @@ def rebalance_overlay_after_assign(overlay, issue_id, new_priority):
         out[key] = {}
     entry = out[key]
     old_priority = entry.get("personal_priority")
+    _reserved = (COLUMN_VISIBILITY_KEY, COLUMN_PREFERENCES_KEY)
     someone_else_has_n = any(
-        k != key and k != COLUMN_VISIBILITY_KEY and (out[k].get("personal_priority")) == n
+        k != key and k not in _reserved and (out[k].get("personal_priority")) == n
         for k in out
     )
     if someone_else_has_n:
         for k in out:
-            if k == COLUMN_VISIBILITY_KEY:
+            if k in _reserved:
                 continue
             p = out[k].get("personal_priority")
             if p is not None and p >= n:
@@ -328,7 +379,7 @@ def rebalance_overlay_after_assign(overlay, issue_id, new_priority):
         out[key] = {**entry, "personal_priority": n}
         if old_priority is not None and old_priority != n:
             for k in out:
-                if k == key or k == COLUMN_VISIBILITY_KEY:
+                if k == key or k in _reserved:
                     continue
                 p = out[k].get("personal_priority")
                 if p is not None and p > old_priority:
@@ -346,10 +397,11 @@ def rebalance_overlay_after_remove(overlay, issue_id):
     removed = entry.get("personal_priority")
     if removed is None:
         return copy.deepcopy(overlay)
+    _reserved = (COLUMN_VISIBILITY_KEY, COLUMN_PREFERENCES_KEY)
     out = copy.deepcopy(overlay)
     out[key] = {k: v for k, v in entry.items() if k != "personal_priority"}
     for k in out:
-        if k == COLUMN_VISIBILITY_KEY:
+        if k in _reserved:
             continue
         p = out[k].get("personal_priority")
         if p is not None and p > removed:
@@ -374,7 +426,7 @@ def rebalance_overlay_after_remove_multiple(overlay, issue_ids):
             continue
         out[k] = {kk: vv for kk, vv in out[k].items() if kk != "personal_priority"}
         for kk in out:
-            if kk == COLUMN_VISIBILITY_KEY:
+            if kk in (COLUMN_VISIBILITY_KEY, COLUMN_PREFERENCES_KEY):
                 continue
             p = out[kk].get("personal_priority")
             if p is not None and p > removed:
@@ -384,10 +436,11 @@ def rebalance_overlay_after_remove_multiple(overlay, issue_ids):
 
 def resolve_priority_conflicts(overlay):
     """Pure: if duplicate personal_priority values exist, reassign contiguous 1,2,3 by last_updated desc.
-    Returns a new overlay dict; does not mutate input. No I/O. Skips reserved key column_visibility."""
+    Returns a new overlay dict; does not mutate input. No I/O. Skips reserved keys."""
+    _reserved = (COLUMN_VISIBILITY_KEY, COLUMN_PREFERENCES_KEY)
     entries_with_priority = [
         (k, v) for k, v in overlay.items()
-        if k != COLUMN_VISIBILITY_KEY and isinstance(v, dict) and v.get("personal_priority") is not None
+        if k not in _reserved and isinstance(v, dict) and v.get("personal_priority") is not None
     ]
     if not entries_with_priority:
         return copy.deepcopy(overlay)
@@ -870,34 +923,48 @@ def api_overlay_save(issue_id):
 
 @app.route("/api/config/columns", methods=["GET"])
 def api_config_columns_get():
-    """Return column registry and current column visibility (single source of truth for frontend)."""
+    """Return column registry and current column order and visibility (single source of truth for frontend)."""
+    prefs = get_column_preferences()
     return jsonify({
         "columns": COLUMN_REGISTRY,
-        "column_visibility": get_column_visibility(),
+        "order": prefs["order"],
+        "visibility": prefs["visibility"],
     })
 
 
 @app.route("/api/config/columns", methods=["POST"])
 def api_config_columns_post():
-    """Update column visibility; persist to overlay.json. Reject hiding identifier/title or all other columns."""
+    """Update column order and visibility; persist to overlay.json. Reject invalid order or hiding identifier/title."""
     data = request.get_json(force=True, silent=True) or {}
-    visibility = data.get("column_visibility")
+    order = data.get("order")
+    visibility = data.get("visibility")
+    if not isinstance(order, list):
+        return jsonify({"error": "order must be an array of column IDs"}), 400
     if not isinstance(visibility, dict):
-        return jsonify({"error": "column_visibility must be a dict"}), 400
-    current = get_column_visibility()
-    # Merge: only update keys present in payload
-    merged = {**current, **{k: bool(v) for k, v in visibility.items()}}
-    if not merged.get("identifier", True):
+        return jsonify({"error": "visibility must be a dict"}), 400
+    if not _valid_column_order(order):
+        if len(set(order)) != len(order):
+            return jsonify({"error": "order must contain each column ID exactly once (no duplicates)"}), 400
+        missing = _REGISTRY_IDS - set(order)
+        extra = set(order) - _REGISTRY_IDS
+        if missing or extra:
+            return jsonify({"error": "order must contain every column ID exactly once"}), 400
+        return jsonify({"error": "order must contain every column ID exactly once"}), 400
+    current = get_column_preferences()
+    merged_vis = {**current["visibility"], **{k: bool(v) for k, v in visibility.items() if k in _REGISTRY_IDS}}
+    if not merged_vis.get("identifier", True):
         return jsonify({"error": "identifier column cannot be hidden"}), 400
-    if not merged.get("title", True):
+    if not merged_vis.get("title", True):
         return jsonify({"error": "title column cannot be hidden"}), 400
-    visible_count = sum(1 for c in COLUMN_REGISTRY if merged.get(c["id"], True))
+    visible_count = sum(1 for c in COLUMN_REGISTRY if merged_vis.get(c["id"], True))
     if visible_count <= 2:
         return jsonify({"error": "At least one column besides Issue and Title must remain visible"}), 400
-    write_column_visibility(merged)
+    write_column_preferences(order, merged_vis)
+    prefs = get_column_preferences()
     return jsonify({
         "columns": COLUMN_REGISTRY,
-        "column_visibility": get_column_visibility(),
+        "order": prefs["order"],
+        "visibility": prefs["visibility"],
     })
 
 

@@ -213,12 +213,12 @@
       z-index: 50;
       display: none;
     }
-    .filter-popover.open { display: block; }
+    .filter-popover.open { display: flex; flex-direction: column; max-height: min(70vh, 480px); }
+    .filter-popover .filter-popover-scroll { flex: 1; min-height: 0; overflow-y: auto; }
     .filter-popover .filter-section { margin-bottom: 0.75rem; }
     .filter-popover .filter-section label { display: block; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem; }
-    .filter-popover .filter-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1rem; }
+    .filter-popover .filter-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1rem; flex-shrink: 0; }
     .filter-popover input[type="date"] { background: var(--bg); color: var(--text); border: 1px solid var(--border); padding: 0.35rem; border-radius: 4px; font-size: 0.875rem; }
-    .filter-popover .checkbox-list { max-height: 120px; overflow-y: auto; }
     .filter-popover .checkbox-list label { display: flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; color: var(--text); margin: 0.25rem 0; cursor: pointer; }
     .filter-popover .checkbox-list input[type="checkbox"] { margin: 0; }
     .th-sortable { cursor: pointer; user-select: none; white-space: nowrap; }
@@ -230,6 +230,11 @@
     .column-popover .column-list label { display: flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; color: var(--text); margin: 0.25rem 0; cursor: pointer; }
     .column-popover .column-list label.disabled { opacity: 0.7; cursor: default; }
     .column-popover .column-list input[type="checkbox"] { margin: 0; }
+    .column-popover .column-row { display: flex; align-items: center; gap: 0.25rem; margin: 0.25rem 0; }
+    .column-popover .column-order-btn { width: 1.5rem; height: 1.5rem; padding: 0; font-size: 0.7rem; line-height: 1; background: var(--surface); border: 1px solid var(--border); border-radius: 4px; color: var(--text); cursor: pointer; flex-shrink: 0; }
+    .column-popover .column-order-btn:hover:not(:disabled) { background: var(--border); }
+    .column-popover .column-order-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .column-popover .column-row label { flex: 1; margin: 0; }
     .column-popover .column-actions { margin-top: 0.75rem; }
     .column-popover .column-message { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem; }
     .label-badge { display: inline-block; padding: 0.15rem 0.4rem; border-radius: 4px; font-size: 0.7rem; margin-right: 0.25rem; margin-bottom: 0.15rem; }
@@ -265,7 +270,9 @@
       </button>
       <span class="filter-badge" id="filter-badge" aria-hidden="true"></span>
       <div class="filter-popover" id="filter-popover">
-        <div id="filter-sections"></div>
+        <div class="filter-popover-scroll">
+          <div id="filter-sections"></div>
+        </div>
         <div class="filter-actions">
           <button type="button" id="filter-clear">Clear All</button>
           <button type="button" id="filter-apply" class="primary">Apply</button>
@@ -316,6 +323,7 @@
       let priorityLabels = {};
       let personalStatusOptions = [];
       let columns = [];
+      let columnOrder = [];
       let columnVisibility = {};
       let editingIssueId = null;
       let filterConfig = {
@@ -593,13 +601,65 @@
         editingIssueId = null;
       }
 
+      function getOrderedColumns() {
+        return columnOrder.map(function(id) { return columns.find(function(c) { return c.id === id; }); }).filter(Boolean);
+      }
+
       function getVisibleColumns() {
-        return columns.filter(function(c) { return columnVisibility[c.id]; });
+        return getOrderedColumns().filter(function(c) { return columnVisibility[c.id]; });
+      }
+
+      function saveColumnPreferences() {
+        fetch('/api/config/columns', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ order: columnOrder, visibility: columnVisibility })
+        }).then(function(r) { return r.json(); }).then(function(data) {
+          if (data.order) columnOrder = data.order;
+          if (data.visibility) columnVisibility = data.visibility;
+          buildThead();
+          buildColumnPopover();
+          buildFilterPopover();
+          clearFiltersForHiddenColumns();
+          updateFilterBadge();
+          renderTable();
+        }).catch(function() {});
       }
 
       function buildColumnPopover() {
         columnList.innerHTML = '';
-        columns.forEach(function(col) {
+        var ordered = getOrderedColumns();
+        ordered.forEach(function(col, idx) {
+          var row = document.createElement('div');
+          row.className = 'column-row';
+          var upBtn = document.createElement('button');
+          upBtn.type = 'button';
+          upBtn.className = 'column-order-btn';
+          upBtn.setAttribute('aria-label', 'Move up');
+          upBtn.textContent = '\u25B2';
+          upBtn.disabled = idx === 0;
+          upBtn.addEventListener('click', function() {
+            if (idx === 0) return;
+            var o = columnOrder.slice();
+            o[idx] = o[idx - 1];
+            o[idx - 1] = col.id;
+            columnOrder = o;
+            saveColumnPreferences();
+          });
+          var downBtn = document.createElement('button');
+          downBtn.type = 'button';
+          downBtn.className = 'column-order-btn';
+          downBtn.setAttribute('aria-label', 'Move down');
+          downBtn.textContent = '\u25BC';
+          downBtn.disabled = idx === ordered.length - 1;
+          downBtn.addEventListener('click', function() {
+            if (idx === ordered.length - 1) return;
+            var o = columnOrder.slice();
+            o[idx] = o[idx + 1];
+            o[idx + 1] = col.id;
+            columnOrder = o;
+            saveColumnPreferences();
+          });
           var label = document.createElement('label');
           var disabled = (col.id === 'identifier' || col.id === 'title');
           if (disabled) label.classList.add('disabled');
@@ -620,22 +680,14 @@
             }
             columnMessage.style.display = 'none';
             columnVisibility = next;
-            fetch('/api/config/columns', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ column_visibility: columnVisibility })
-            }).then(function(r) { return r.json(); }).then(function(data) {
-              if (data.column_visibility) columnVisibility = data.column_visibility;
-              buildThead();
-              buildFilterPopover();
-              clearFiltersForHiddenColumns();
-              updateFilterBadge();
-              renderTable();
-            }).catch(function() {});
+            saveColumnPreferences();
           });
           label.appendChild(cb);
           label.appendChild(document.createTextNode(' ' + col.label));
-          columnList.appendChild(label);
+          row.appendChild(upBtn);
+          row.appendChild(downBtn);
+          row.appendChild(label);
+          columnList.appendChild(row);
         });
       }
 
@@ -878,7 +930,8 @@
         }).catch(function() {});
         fetch('/api/config/columns').then(function(r) { return r.json(); }).then(function(data) {
           columns = data.columns || [];
-          columnVisibility = data.column_visibility || {};
+          columnOrder = data.order && data.order.length === columns.length ? data.order : columns.map(function(c) { return c.id; });
+          columnVisibility = data.visibility || {};
           buildThead();
           buildColumnPopover();
           buildFilterPopover();
@@ -1103,19 +1156,10 @@
         columnMessage.style.display = 'none';
       });
       document.getElementById('column-reset').addEventListener('click', function() {
+        columnOrder = columns.map(function(c) { return c.id; });
+        columnVisibility = {};
         columns.forEach(function(c) { columnVisibility[c.id] = c.default_visible; });
-        fetch('/api/config/columns', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ column_visibility: columnVisibility })
-        }).then(function(r) { return r.json(); }).then(function(data) {
-          if (data.column_visibility) columnVisibility = data.column_visibility;
-          buildColumnPopover();
-          buildThead();
-          buildFilterPopover();
-          updateFilterBadge();
-          renderTable();
-        }).catch(function() {});
+        saveColumnPreferences();
       });
       refreshBtn.addEventListener('click', function() { loadIssues(true); });
       tabActiveEl.addEventListener('click', function() {

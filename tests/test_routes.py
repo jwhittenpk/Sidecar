@@ -552,14 +552,15 @@ def test_post_api_overlay_invalid_personal_status_returns_400(temp_overlay_path,
 # --- GET/POST /api/config/columns ---
 
 
-def test_get_api_config_columns_returns_registry_and_visibility(temp_overlay_path):
-    """GET /api/config/columns returns column registry and default visibility (fresh install)."""
+def test_get_api_config_columns_returns_registry_order_visibility(temp_overlay_path):
+    """GET /api/config/columns returns column registry, order, and visibility (fresh install)."""
     client = app_module.app.test_client()
     resp = client.get("/api/config/columns")
     assert resp.status_code == 200
     data = resp.get_json()
     assert "columns" in data
-    assert "column_visibility" in data
+    assert "order" in data
+    assert "visibility" in data
     columns = data["columns"]
     assert isinstance(columns, list)
     assert len(columns) >= 9
@@ -570,7 +571,10 @@ def test_get_api_config_columns_returns_registry_and_visibility(temp_overlay_pat
     assert "cycle" in ids
     assert "team" in ids
     assert "labels" in ids
-    vis = data["column_visibility"]
+    order = data["order"]
+    assert isinstance(order, list)
+    assert set(order) == set(ids)
+    vis = data["visibility"]
     assert vis.get("identifier") is True
     assert vis.get("title") is True
     assert vis.get("cycle") is False
@@ -578,9 +582,11 @@ def test_get_api_config_columns_returns_registry_and_visibility(temp_overlay_pat
     assert vis.get("labels") is False
 
 
-def test_post_api_config_columns_updates_visibility(temp_overlay_path):
-    """POST /api/config/columns with valid body updates overlay and returns new visibility."""
+def test_post_api_config_columns_persists_order_and_visibility(temp_overlay_path):
+    """POST /api/config/columns with valid order and visibility persists and returns them."""
     client = app_module.app.test_client()
+    order = [c["id"] for c in app_module.COLUMN_REGISTRY]
+    order = [order[1], order[0]] + order[2:]
     new_vis = {
         "identifier": True,
         "title": True,
@@ -597,25 +603,62 @@ def test_post_api_config_columns_updates_visibility(temp_overlay_path):
     }
     resp = client.post(
         "/api/config/columns",
-        data=json.dumps({"column_visibility": new_vis}),
+        data=json.dumps({"order": order, "visibility": new_vis}),
         content_type="application/json",
     )
     assert resp.status_code == 200
     data = resp.get_json()
-    assert data["column_visibility"].get("cycle") is True
+    assert data["order"] == order
+    assert data["visibility"].get("cycle") is True
     assert temp_overlay_path.exists()
     with open(temp_overlay_path, encoding="utf-8") as f:
         overlay = json.load(f)
-    assert app_module.COLUMN_VISIBILITY_KEY in overlay
-    assert overlay[app_module.COLUMN_VISIBILITY_KEY].get("cycle") is True
+    assert app_module.COLUMN_PREFERENCES_KEY in overlay
+    assert overlay[app_module.COLUMN_PREFERENCES_KEY]["order"] == order
+    assert overlay[app_module.COLUMN_PREFERENCES_KEY]["visibility"]["cycle"] is True
+
+
+def test_post_api_config_columns_duplicate_order_returns_400(temp_overlay_path):
+    """POST /api/config/columns with duplicate column ID in order returns 400."""
+    client = app_module.app.test_client()
+    order = [c["id"] for c in app_module.COLUMN_REGISTRY]
+    order = list(order)
+    order[0] = order[1]
+    vis = {c["id"]: c["default_visible"] for c in app_module.COLUMN_REGISTRY}
+    resp = client.post(
+        "/api/config/columns",
+        data=json.dumps({"order": order, "visibility": vis}),
+        content_type="application/json",
+    )
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert "error" in data
+
+
+def test_post_api_config_columns_missing_order_returns_400(temp_overlay_path):
+    """POST /api/config/columns with missing column ID in order returns 400."""
+    client = app_module.app.test_client()
+    order = [c["id"] for c in app_module.COLUMN_REGISTRY][1:]
+    vis = {c["id"]: c["default_visible"] for c in app_module.COLUMN_REGISTRY}
+    resp = client.post(
+        "/api/config/columns",
+        data=json.dumps({"order": order, "visibility": vis}),
+        content_type="application/json",
+    )
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert "error" in data
 
 
 def test_post_api_config_columns_rejects_hiding_identifier(temp_overlay_path):
     """POST /api/config/columns with identifier false returns 400."""
     client = app_module.app.test_client()
+    order = [c["id"] for c in app_module.COLUMN_REGISTRY]
+    vis = {c["id"]: c["default_visible"] for c in app_module.COLUMN_REGISTRY}
+    vis["identifier"] = False
     resp = client.post(
         "/api/config/columns",
-        data=json.dumps({"column_visibility": {"identifier": False}}),
+        data=json.dumps({"order": order, "visibility": vis}),
         content_type="application/json",
     )
     assert resp.status_code == 400
@@ -627,9 +670,12 @@ def test_post_api_config_columns_rejects_hiding_identifier(temp_overlay_path):
 def test_post_api_config_columns_rejects_hiding_title(temp_overlay_path):
     """POST /api/config/columns with title false returns 400."""
     client = app_module.app.test_client()
+    order = [c["id"] for c in app_module.COLUMN_REGISTRY]
+    vis = {c["id"]: c["default_visible"] for c in app_module.COLUMN_REGISTRY}
+    vis["title"] = False
     resp = client.post(
         "/api/config/columns",
-        data=json.dumps({"column_visibility": {"title": False}}),
+        data=json.dumps({"order": order, "visibility": vis}),
         content_type="application/json",
     )
     assert resp.status_code == 400
@@ -641,15 +687,34 @@ def test_post_api_config_columns_rejects_hiding_title(temp_overlay_path):
 def test_post_api_config_columns_rejects_only_identifier_title_visible(temp_overlay_path):
     """POST /api/config/columns that would leave only identifier and title visible returns 400."""
     client = app_module.app.test_client()
+    order = [c["id"] for c in app_module.COLUMN_REGISTRY]
     only_two = {
         c["id"]: (c["id"] in ("identifier", "title"))
         for c in app_module.COLUMN_REGISTRY
     }
     resp = client.post(
         "/api/config/columns",
-        data=json.dumps({"column_visibility": only_two}),
+        data=json.dumps({"order": order, "visibility": only_two}),
         content_type="application/json",
     )
     assert resp.status_code == 400
     data = resp.get_json()
     assert "error" in data
+
+
+def test_filter_order_matches_column_order_after_reorder(temp_overlay_path):
+    """After POST with custom order, GET returns that order (filter popover can follow column order)."""
+    client = app_module.app.test_client()
+    order = [c["id"] for c in app_module.COLUMN_REGISTRY]
+    order = [order[2], order[0], order[1]] + order[3:]
+    vis = {c["id"]: c["default_visible"] for c in app_module.COLUMN_REGISTRY}
+    resp = client.post(
+        "/api/config/columns",
+        data=json.dumps({"order": order, "visibility": vis}),
+        content_type="application/json",
+    )
+    assert resp.status_code == 200
+    resp2 = client.get("/api/config/columns")
+    assert resp2.status_code == 200
+    data = resp2.get_json()
+    assert data["order"] == order
