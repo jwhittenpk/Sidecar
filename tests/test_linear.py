@@ -322,3 +322,102 @@ def test_personal_priority_sort_unranked_use_cycle_order():
     # Unranked sorted by cycle: In Review before Todo
     assert unranked[0]["linear_status"] == "In Review"
     assert unranked[1]["linear_status"] == "Todo"
+
+
+def _issue_with_overlay(identifier, linear_priority=2, personal_priority=None, linear_status="In Progress",
+                        updated_at="2025-02-20T10:00:00Z", last_updated=None, personal_status=""):
+    """Merged-issue shape for sort tests (includes last_updated, personal_status)."""
+    i = _issue(identifier, linear_priority=linear_priority, personal_priority=personal_priority,
+               linear_status=linear_status, updated_at=updated_at)
+    i["last_updated"] = last_updated
+    i["personal_status"] = personal_status
+    return i
+
+
+def test_sort_linear_status_ascending():
+    """Sort by linear_status ascending (A-Z alphabetical)."""
+    issues = [
+        _issue_with_overlay("LIN-c", linear_status="Done"),
+        _issue_with_overlay("LIN-a", linear_status="Backlog"),
+        _issue_with_overlay("LIN-b", linear_status="In Progress"),
+    ]
+    result = app_module._apply_sort(issues, "linear_status")
+    # Alphabetical: Backlog < Done < In Progress
+    assert [r["identifier"] for r in result] == ["LIN-a", "LIN-c", "LIN-b"]
+    assert [r["linear_status"] for r in result] == ["Backlog", "Done", "In Progress"]
+
+
+def test_sort_linear_priority_urgent_to_no_priority():
+    """Linear priority sort: Urgent(1) → High(2) → Medium(3) → Low(4) → No Priority(0), not alphabetical."""
+    issues = [
+        _issue_with_overlay("LIN-low", linear_priority=4),
+        _issue_with_overlay("LIN-urgent", linear_priority=1),
+        _issue_with_overlay("LIN-none", linear_priority=0),
+        _issue_with_overlay("LIN-high", linear_priority=2),
+        _issue_with_overlay("LIN-medium", linear_priority=3),
+    ]
+    result = app_module._apply_sort(issues, "linear_priority")
+    order = [r["identifier"] for r in result]
+    assert order == ["LIN-urgent", "LIN-high", "LIN-medium", "LIN-low", "LIN-none"]
+
+
+def test_sort_personal_priority_unset_last_ascending():
+    """Personal priority sort ascending: unset issues appear last."""
+    issues = [
+        _issue_with_overlay("LIN-unset", personal_priority=None),
+        _issue_with_overlay("LIN-2", personal_priority=2),
+        _issue_with_overlay("LIN-1", personal_priority=1),
+    ]
+    result = app_module._apply_sort(issues, "personal_priority")
+    assert result[0]["personal_priority"] == 1
+    assert result[1]["personal_priority"] == 2
+    assert result[2]["personal_priority"] is None
+
+
+def test_sort_personal_status_ascending():
+    """Sort by personal_status ascending (alphabetical)."""
+    issues = [
+        _issue_with_overlay("LIN-b", personal_status="Blocked"),
+        _issue_with_overlay("LIN-a", personal_status=""),
+        _issue_with_overlay("LIN-c", personal_status="In Progress"),
+    ]
+    result = app_module._apply_sort(issues, "personal_status")
+    # Empty string sorts before "Blocked" and "In Progress"
+    assert [r["personal_status"] for r in result] == ["", "Blocked", "In Progress"]
+
+
+def test_sort_updated_at_descending():
+    """Sort by updated_at: default is newest first (reverse=True in backend)."""
+    issues = [
+        _issue_with_overlay("LIN-old", updated_at="2025-02-01T10:00:00Z"),
+        _issue_with_overlay("LIN-new", updated_at="2025-02-25T10:00:00Z"),
+    ]
+    result = app_module._apply_sort(issues, "updated_at")
+    assert result[0]["identifier"] == "LIN-new"
+    assert result[1]["identifier"] == "LIN-old"
+
+
+def test_sort_last_updated_ascending_no_edit_last():
+    """My Last Edit sort ascending: oldest first, no edit last."""
+    issues = [
+        _issue_with_overlay("LIN-no-edit", last_updated=None),
+        _issue_with_overlay("LIN-old", last_updated="2025-02-01T10:00:00Z"),
+        _issue_with_overlay("LIN-new", last_updated="2025-02-25T10:00:00Z"),
+    ]
+    result = app_module._apply_sort(issues, "last_updated", "asc")
+    assert result[0]["identifier"] == "LIN-old"
+    assert result[1]["identifier"] == "LIN-new"
+    assert result[2]["identifier"] == "LIN-no-edit"
+
+
+def test_sort_last_updated_descending_no_edit_first():
+    """My Last Edit sort descending: newest first, no edit first."""
+    issues = [
+        _issue_with_overlay("LIN-old", last_updated="2025-02-01T10:00:00Z"),
+        _issue_with_overlay("LIN-no-edit", last_updated=None),
+        _issue_with_overlay("LIN-new", last_updated="2025-02-25T10:00:00Z"),
+    ]
+    result = app_module._apply_sort(issues, "last_updated", "desc")
+    assert result[0]["identifier"] == "LIN-new"
+    assert result[1]["identifier"] == "LIN-old"
+    assert result[2]["identifier"] == "LIN-no-edit"

@@ -163,6 +163,50 @@
       border-bottom-color: var(--link);
       font-weight: 500;
     }
+    .filter-btn-wrap { position: relative; display: inline-block; }
+    .filter-btn-wrap .filter-badge {
+      position: absolute;
+      top: -4px;
+      right: -4px;
+      min-width: 16px;
+      height: 16px;
+      padding: 0 4px;
+      border-radius: 8px;
+      background: var(--priority-urgent);
+      color: #fff;
+      font-size: 0.7rem;
+      font-weight: 600;
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+    .filter-btn-wrap .filter-badge.visible { display: flex; }
+    .filter-popover {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      margin-top: 4px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+      min-width: 280px;
+      max-width: 90vw;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+      z-index: 50;
+      display: none;
+    }
+    .filter-popover.open { display: block; }
+    .filter-popover .filter-section { margin-bottom: 0.75rem; }
+    .filter-popover .filter-section label { display: block; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem; }
+    .filter-popover .filter-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1rem; }
+    .filter-popover input[type="date"] { background: var(--bg); color: var(--text); border: 1px solid var(--border); padding: 0.35rem; border-radius: 4px; font-size: 0.875rem; }
+    .filter-popover .checkbox-list { max-height: 120px; overflow-y: auto; }
+    .filter-popover .checkbox-list label { display: flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; color: var(--text); margin: 0.25rem 0; cursor: pointer; }
+    .filter-popover .checkbox-list input[type="checkbox"] { margin: 0; }
+    .th-sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+    .th-sortable:hover { color: var(--text); }
+    .th-sortable .sort-indicator { margin-left: 0.25rem; opacity: 0.7; }
   </style>
 </head>
 <body>
@@ -177,13 +221,55 @@
     <button type="button" class="tab" id="tab-completed" role="tab" aria-selected="false">Completed</button>
   </div>
   <div class="controls">
+    <div class="filter-btn-wrap">
+      <button type="button" id="filter-btn" title="Filter issues">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+      </button>
+      <span class="filter-badge" id="filter-badge" aria-hidden="true"></span>
+    </div>
+    <div class="filter-popover" id="filter-popover">
+      <div class="filter-section">
+        <label>Linear Updated — From</label>
+        <input type="date" id="filter-date-from">
+      </div>
+      <div class="filter-section">
+        <label>Linear Updated — To</label>
+        <input type="date" id="filter-date-to">
+      </div>
+      <div class="filter-section">
+        <label>Linear Status</label>
+        <div class="checkbox-list" id="filter-linear-status"></div>
+      </div>
+      <div class="filter-section">
+        <label>Linear Priority</label>
+        <div class="checkbox-list" id="filter-linear-priority"></div>
+      </div>
+      <div class="filter-section">
+        <label>Personal Priority</label>
+        <select id="filter-personal-priority">
+          <option value="all">All</option>
+          <option value="set">Set</option>
+          <option value="unset">Unset</option>
+        </select>
+      </div>
+      <div class="filter-section">
+        <label>Personal Status</label>
+        <div class="checkbox-list" id="filter-personal-status"></div>
+      </div>
+      <div class="filter-actions">
+        <button type="button" id="filter-clear">Clear All</button>
+        <button type="button" id="filter-apply" class="primary">Apply</button>
+      </div>
+    </div>
     <label>Sort:</label>
     <select id="sort">
       <option value="personal_priority">Personal Priority</option>
       <option value="cycle">Cycle</option>
       <option value="linear_priority">Linear Priority</option>
       <option value="linear_status">Linear Status</option>
-      <option value="updated_at">Last Updated</option>
+      <option value="updated_at">Linear Updated</option>
+      <option value="personal_status">Personal Status</option>
+      <option value="last_updated">My Last Edit</option>
     </select>
     <label>Search:</label>
     <input type="text" id="search" placeholder="Title or notes...">
@@ -196,13 +282,13 @@
     <thead>
       <tr>
         <th>Issue</th>
-        <th>Linear status</th>
-        <th>Linear priority</th>
-        <th>Personal priority</th>
-        <th>Personal status</th>
+        <th class="th-sortable" data-sort-column="linear_status" id="th-linear-status">Linear status <span class="sort-indicator"></span></th>
+        <th class="th-sortable" data-sort-column="linear_priority" id="th-linear-priority">Linear priority <span class="sort-indicator"></span></th>
+        <th class="th-sortable" data-sort-column="personal_priority" id="th-personal-priority">Personal priority <span class="sort-indicator"></span></th>
+        <th class="th-sortable" data-sort-column="personal_status" id="th-personal-status">Personal status <span class="sort-indicator"></span></th>
         <th>Notes</th>
-        <th>Linear Updated</th>
-        <th>My Last Edit</th>
+        <th class="th-sortable" data-sort-column="updated_at" id="th-updated-at">Linear Updated <span class="sort-indicator"></span></th>
+        <th class="th-sortable" data-sort-column="last_updated" id="th-last-updated">My Last Edit <span class="sort-indicator"></span></th>
       </tr>
     </thead>
     <tbody id="issues-body"></tbody>
@@ -238,6 +324,16 @@
       let priorityLabels = {};
       let personalStatusOptions = [];
       let editingIssueId = null;
+      let filterConfig = {
+        date_from: '',
+        date_to: '',
+        linear_statuses: [],
+        linear_priorities: [],
+        personal_priority_filter: 'all',
+        personal_statuses: []
+      };
+      let sortColumn = 'personal_priority';
+      let sortDir = 'asc';
 
       const lastFetchedEl = document.getElementById('last-fetched');
       const refreshBtn = document.getElementById('refresh-btn');
@@ -251,6 +347,17 @@
       const tableEl = document.getElementById('issues-table');
       const tbody = document.getElementById('issues-body');
       const modalEl = document.getElementById('modal');
+      const filterBtn = document.getElementById('filter-btn');
+      const filterBadge = document.getElementById('filter-badge');
+      const filterPopover = document.getElementById('filter-popover');
+      const filterDateFrom = document.getElementById('filter-date-from');
+      const filterDateTo = document.getElementById('filter-date-to');
+      const filterLinearStatus = document.getElementById('filter-linear-status');
+      const filterLinearPriority = document.getElementById('filter-linear-priority');
+      const filterPersonalPriority = document.getElementById('filter-personal-priority');
+      const filterPersonalStatus = document.getElementById('filter-personal-status');
+      const filterClearBtn = document.getElementById('filter-clear');
+      const filterApplyBtn = document.getElementById('filter-apply');
       const modalTitle = document.getElementById('modal-title');
       const modalNotes = document.getElementById('modal-notes');
       const modalPersonalPriority = document.getElementById('modal-personal-priority');
@@ -315,14 +422,83 @@
         return priorityLabels[p] != null ? priorityLabels[p] : '—';
       }
 
+      function clientSortKeyLinearPriority(p) {
+        var v = p != null ? p : 0;
+        return v === 0 ? 5 : v;
+      }
+      function clientSortKeyPersonalPriority(issue, asc) {
+        var p = issue.personal_priority;
+        if (p == null || p === '') return asc ? 1e9 : -1e9;
+        return p;
+      }
+      function clientSortKeyLastUpdated(issue, asc) {
+        var lu = issue.last_updated || '';
+        if (!lu) return asc ? 1 : 0;
+        return asc ? lu : lu;
+      }
+      function sortIssuesClientSide(list, column, dir) {
+        var asc = dir === 'asc';
+        var arr = list.slice();
+        if (column === 'linear_status') {
+          arr.sort(function(a, b) {
+            var sa = (a.linear_status || '').localeCompare(b.linear_status || '');
+            return asc ? sa : -sa;
+          });
+        } else if (column === 'linear_priority') {
+          arr.sort(function(a, b) {
+            var ka = clientSortKeyLinearPriority(a.linear_priority);
+            var kb = clientSortKeyLinearPriority(b.linear_priority);
+            return asc ? (ka - kb) : (kb - ka);
+          });
+        } else if (column === 'personal_priority') {
+          arr.sort(function(a, b) {
+            var ka = clientSortKeyPersonalPriority(a, asc);
+            var kb = clientSortKeyPersonalPriority(b, asc);
+            return ka - kb;
+          });
+        } else if (column === 'personal_status') {
+          arr.sort(function(a, b) {
+            var sa = (a.personal_status || '').localeCompare(b.personal_status || '');
+            return asc ? sa : -sa;
+          });
+        } else if (column === 'updated_at') {
+          arr.sort(function(a, b) {
+            var ua = a.updated_at || '';
+            var ub = b.updated_at || '';
+            var c = ua.localeCompare(ub);
+            return asc ? c : -c;
+          });
+        } else if (column === 'last_updated') {
+          arr.sort(function(a, b) {
+            var ua = a.last_updated || '';
+            var ub = b.last_updated || '';
+            if (!ua && !ub) return 0;
+            if (!ua) return asc ? 1 : -1;
+            if (!ub) return asc ? -1 : 1;
+            var c = ua.localeCompare(ub);
+            return asc ? c : -c;
+          });
+        }
+        return arr;
+      }
+
       function filteredAndSortedIssues() {
-        const q = (searchEl.value || '').trim().toLowerCase();
-        if (!q) return allIssues;
-        return allIssues.filter(function(issue) {
-          const title = (issue.title || '').toLowerCase();
-          const notes = (issue.notes || '').toLowerCase();
+        var q = (searchEl.value || '').trim().toLowerCase();
+        var list = !q ? allIssues : allIssues.filter(function(issue) {
+          var title = (issue.title || '').toLowerCase();
+          var notes = (issue.notes || '').toLowerCase();
           return title.includes(q) || notes.includes(q);
         });
+        return sortIssuesClientSide(list, sortColumn, sortDir);
+      }
+
+      function updateSortIndicators() {
+        document.querySelectorAll('.th-sortable .sort-indicator').forEach(function(span) { span.textContent = ''; });
+        var th = document.querySelector('.th-sortable[data-sort-column="' + sortColumn + '"]');
+        if (th) {
+          var ind = th.querySelector('.sort-indicator');
+          if (ind) ind.textContent = sortDir === 'asc' ? ' ▲' : ' ▼';
+        }
       }
 
       function renderTable() {
@@ -413,16 +589,115 @@
         return tabActiveEl.classList.contains('active') ? 'active' : 'completed';
       }
 
+      function countActiveFilterCategories(cfg) {
+        var n = 0;
+        if ((cfg.date_from || '') !== '' || (cfg.date_to || '') !== '') n++;
+        if ((cfg.linear_statuses || []).length > 0) n++;
+        if ((cfg.linear_priorities || []).length > 0) n++;
+        if ((cfg.personal_priority_filter || 'all') !== 'all') n++;
+        if ((cfg.personal_statuses || []).length > 0) n++;
+        return n;
+      }
+
+      function buildFilterQueryString(cfg) {
+        var parts = [];
+        if ((cfg.date_from || '').trim()) parts.push('date_from=' + encodeURIComponent(cfg.date_from.trim()));
+        if ((cfg.date_to || '').trim()) parts.push('date_to=' + encodeURIComponent(cfg.date_to.trim()));
+        (cfg.linear_statuses || []).forEach(function(s) { parts.push('linear_status=' + encodeURIComponent(s)); });
+        (cfg.linear_priorities || []).forEach(function(p) { parts.push('linear_priority=' + encodeURIComponent(String(p))); });
+        if ((cfg.personal_priority_filter || 'all') !== 'all') parts.push('personal_priority_filter=' + encodeURIComponent(cfg.personal_priority_filter));
+        (cfg.personal_statuses || []).forEach(function(s) { parts.push('personal_status=' + encodeURIComponent(s)); });
+        return parts.length ? '&' + parts.join('&') : '';
+      }
+
+      function updateFilterBadge() {
+        var n = countActiveFilterCategories(filterConfig);
+        filterBadge.textContent = n;
+        if (n > 0) filterBadge.classList.add('visible'); else filterBadge.classList.remove('visible');
+      }
+
+      function syncPopoverFromFilterConfig() {
+        filterDateFrom.value = filterConfig.date_from || '';
+        filterDateTo.value = filterConfig.date_to || '';
+        filterPersonalPriority.value = filterConfig.personal_priority_filter || 'all';
+        var statusSet = {};
+        (filterConfig.linear_statuses || []).forEach(function(s) { statusSet[s] = true; });
+        filterLinearStatus.querySelectorAll('input[type="checkbox"]').forEach(function(cb) {
+          cb.checked = statusSet[cb.value] || false;
+        });
+        var priSet = {};
+        (filterConfig.linear_priorities || []).forEach(function(p) { priSet[String(p)] = true; });
+        filterLinearPriority.querySelectorAll('input[type="checkbox"]').forEach(function(cb) {
+          cb.checked = priSet[cb.value] || false;
+        });
+        var psSet = {};
+        (filterConfig.personal_statuses || []).forEach(function(s) { psSet[s === null ? '' : s] = true; });
+        filterPersonalStatus.querySelectorAll('input[type="checkbox"]').forEach(function(cb) {
+          cb.checked = psSet[cb.value] || false;
+        });
+      }
+
+      function syncFilterConfigFromPopover() {
+        filterConfig.date_from = (filterDateFrom.value || '').trim();
+        filterConfig.date_to = (filterDateTo.value || '').trim();
+        filterConfig.personal_priority_filter = filterPersonalPriority.value || 'all';
+        filterConfig.linear_statuses = [];
+        filterLinearStatus.querySelectorAll('input[type="checkbox"]:checked').forEach(function(cb) { filterConfig.linear_statuses.push(cb.value); });
+        filterConfig.linear_priorities = [];
+        filterLinearPriority.querySelectorAll('input[type="checkbox"]:checked').forEach(function(cb) { filterConfig.linear_priorities.push(parseInt(cb.value, 10)); });
+        filterConfig.personal_statuses = [];
+        filterPersonalStatus.querySelectorAll('input[type="checkbox"]:checked').forEach(function(cb) { filterConfig.personal_statuses.push(cb.value === '__empty__' ? '' : cb.value); });
+      }
+
+      function openFilterPopover() {
+        populateFilterControls();
+        syncPopoverFromFilterConfig();
+        filterPopover.classList.add('open');
+      }
+
+      function closeFilterPopover() {
+        filterPopover.classList.remove('open');
+      }
+
+      function populateFilterControls() {
+        var linearStatuses = [];
+        allIssues.forEach(function(i) {
+          var s = (i.linear_status || '').trim();
+          if (s && linearStatuses.indexOf(s) === -1) linearStatuses.push(s);
+        });
+        linearStatuses.sort();
+        filterLinearStatus.innerHTML = linearStatuses.map(function(s) {
+          return '<label><input type="checkbox" value="' + escapeHtml(s) + '"> ' + escapeHtml(s) + '</label>';
+        }).join('');
+        var priorityOrder = [1, 2, 3, 4, 0];
+        filterLinearPriority.innerHTML = priorityOrder.map(function(p) {
+          var label = priorityLabels[p] != null ? priorityLabels[p] : 'Priority ' + p;
+          return '<label><input type="checkbox" value="' + p + '"> ' + escapeHtml(label) + '</label>';
+        }).join('');
+        filterPersonalStatus.innerHTML = (personalStatusOptions || []).map(function(o) {
+          var val = (o === '' || o === undefined) ? '__empty__' : o;
+          var display = (o === '' || o === undefined) ? 'No status' : o;
+          return '<label><input type="checkbox" value="' + escapeHtml(val) + '"> ' + escapeHtml(display) + '</label>';
+        }).join('');
+      }
+
       function loadIssues(isRefresh) {
         hideError();
         setLoading(true);
         const filter = getFilter();
         const sort = sortEl.value;
-        const apiUrl = '/api/issues?filter=' + encodeURIComponent(filter) + '&sort=' + encodeURIComponent(sort);
+        let apiUrl = '/api/issues?filter=' + encodeURIComponent(filter) + '&sort=' + encodeURIComponent(sort);
+        if (sort === 'last_updated') apiUrl += '&sort_dir=desc';
+        apiUrl += buildFilterQueryString(filterConfig);
         function onData(data) {
           if (data.error) throw new Error(data.error);
           allIssues = data.issues || [];
           if (data.last_fetched) lastFetchedEl.textContent = 'Last fetched: ' + formatDate(data.last_fetched);
+          sortColumn = sortEl.value;
+          sortDir = 'asc';
+          if (sortColumn === 'updated_at' || sortColumn === 'last_updated') sortDir = 'desc';
+          updateFilterBadge();
+          updateSortIndicators();
           renderTable();
         }
         if (isRefresh) {
@@ -502,6 +777,26 @@
           .catch(function(err) { showError(err.message || 'Failed to save'); });
       }
 
+      filterBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        if (filterPopover.classList.contains('open')) closeFilterPopover(); else openFilterPopover();
+      });
+      filterApplyBtn.addEventListener('click', function() {
+        syncFilterConfigFromPopover();
+        updateFilterBadge();
+        closeFilterPopover();
+        loadIssues(false);
+      });
+      filterClearBtn.addEventListener('click', function() {
+        filterConfig = { date_from: '', date_to: '', linear_statuses: [], linear_priorities: [], personal_priority_filter: 'all', personal_statuses: [] };
+        syncPopoverFromFilterConfig();
+        updateFilterBadge();
+        closeFilterPopover();
+        loadIssues(false);
+      });
+      document.addEventListener('click', function(e) {
+        if (filterPopover.classList.contains('open') && !filterPopover.contains(e.target) && !filterBtn.contains(e.target)) closeFilterPopover();
+      });
       refreshBtn.addEventListener('click', function() { loadIssues(true); });
       tabActiveEl.addEventListener('click', function() {
         if (tabActiveEl.classList.contains('active')) return;
@@ -523,6 +818,17 @@
       });
       sortEl.addEventListener('change', function() { loadIssues(false); });
       searchEl.addEventListener('input', renderTable);
+      document.querySelectorAll('.th-sortable').forEach(function(th) {
+        th.addEventListener('click', function() {
+          var col = th.getAttribute('data-sort-column');
+          if (!col) return;
+          if (sortColumn === col) sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+          else { sortColumn = col; sortDir = 'asc'; if (col === 'updated_at' || col === 'last_updated') sortDir = 'desc'; }
+          sortEl.value = sortColumn;
+          updateSortIndicators();
+          renderTable();
+        });
+      });
       modalCancel.addEventListener('click', closeModal);
       modalSave.addEventListener('click', saveOverlay);
       modalEl.addEventListener('click', function(e) {

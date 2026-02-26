@@ -490,10 +490,115 @@ def _apply_filter(issues, filter_val):
     return list(issues)
 
 
-def _apply_sort(issues, sort_val):
-    """Sort issues by sort_val: 'cycle' | 'personal_priority' | 'linear_priority' | 'linear_status' | 'updated_at'."""
+def apply_issue_filters(issues, filter_config):
+    """Filter issues by date range, Linear status/priority, personal priority set/unset, personal status.
+    filter_config: dict with date_from, date_to (ISO date or None), linear_statuses (list of str),
+    linear_priorities (list of int 0-4), personal_priority_filter ('all'|'set'|'unset'),
+    personal_statuses (list of str, '' = No Status). All filters are ANDed. Pure function, no I/O."""
+    if not filter_config:
+        return list(issues)
+    result = list(issues)
+    cfg = filter_config or {}
+    date_from = cfg.get("date_from")
+    date_to = cfg.get("date_to")
+    if date_from is not None or date_to is not None:
+        def in_date_range(issue):
+            updated = _parse_iso_date(issue.get("updated_at"))
+            if not updated:
+                return False
+            d = updated.date()
+            if date_from is not None:
+                try:
+                    from_dt = datetime.fromisoformat(date_from.replace("Z", "+00:00")).date()
+                    if d < from_dt:
+                        return False
+                except (ValueError, AttributeError):
+                    pass
+            if date_to is not None:
+                try:
+                    to_dt = datetime.fromisoformat(date_to.replace("Z", "+00:00")).date()
+                    if d > to_dt:
+                        return False
+                except (ValueError, AttributeError):
+                    pass
+            return True
+        result = [i for i in result if in_date_range(i)]
+    linear_statuses = cfg.get("linear_statuses") or []
+    if linear_statuses:
+        status_set = set(linear_statuses)
+        result = [i for i in result if (i.get("linear_status") or "") in status_set]
+    linear_priorities = cfg.get("linear_priorities") or []
+    if linear_priorities:
+        pri_set = set(int(p) for p in linear_priorities if p is not None)
+        result = [i for i in result if (i.get("linear_priority") if i.get("linear_priority") is not None else 0) in pri_set]
+    personal_priority_filter = (cfg.get("personal_priority_filter") or "all").strip().lower()
+    if personal_priority_filter == "set":
+        result = [i for i in result if i.get("personal_priority") is not None]
+    elif personal_priority_filter == "unset":
+        result = [i for i in result if i.get("personal_priority") is None]
+    personal_statuses = cfg.get("personal_statuses") or []
+    if personal_statuses:
+        status_set = set(s if s is not None else "" for s in personal_statuses)
+        result = [i for i in result if (i.get("personal_status") or "") in status_set]
+    return result
+
+
+def _parse_filter_config_from_request():
+    """Build filter_config dict from Flask request args. For GET /api/issues."""
+    cfg = {}
+    date_from = request.args.get("date_from")
+    date_to = request.args.get("date_to")
+    if date_from and (date_from := date_from.strip()):
+        cfg["date_from"] = date_from
+    if date_to and (date_to := date_to.strip()):
+        cfg["date_to"] = date_to
+    linear_status = request.args.getlist("linear_status") or request.args.get("linear_status")
+    if linear_status is not None:
+        if isinstance(linear_status, str):
+            linear_status = [s.strip() for s in linear_status.split(",") if s.strip() or s == ""]
+        else:
+            linear_status = [s.strip() if isinstance(s, str) else s for s in linear_status]
+        if linear_status:
+            cfg["linear_statuses"] = linear_status
+    linear_priority = request.args.getlist("linear_priority") or request.args.get("linear_priority")
+    if linear_priority is not None:
+        if isinstance(linear_priority, str):
+            linear_priority = [p.strip() for p in linear_priority.split(",")]
+        else:
+            linear_priority = [p.strip() if isinstance(p, str) else p for p in linear_priority]
+        pri_ints = []
+        for p in linear_priority:
+            try:
+                pri_ints.append(int(p))
+            except (TypeError, ValueError):
+                pass
+        if pri_ints:
+            cfg["linear_priorities"] = pri_ints
+    personal_priority_filter = request.args.get("personal_priority_filter")
+    if personal_priority_filter and (personal_priority_filter := personal_priority_filter.strip().lower()) in ("set", "unset", "all"):
+        cfg["personal_priority_filter"] = personal_priority_filter
+    personal_status = request.args.getlist("personal_status") or request.args.get("personal_status")
+    if personal_status is not None:
+        if isinstance(personal_status, str):
+            # Allow empty string for "No status" via a special token or empty
+            personal_status = [s.strip() for s in personal_status.split(",")]
+            if "" in personal_status or any(s == "" for s in personal_status):
+                pass
+            else:
+                personal_status = [s for s in personal_status if s is not None]
+        else:
+            personal_status = [s if s == "" else (s.strip() if isinstance(s, str) else s) for s in personal_status]
+        if personal_status is not None and len(personal_status) > 0:
+            cfg["personal_statuses"] = personal_status
+    return cfg
+
+
+def _apply_sort(issues, sort_val, sort_dir=None):
+    """Sort issues by sort_val: 'cycle' | 'personal_priority' | 'linear_priority' | 'linear_status' |
+    'updated_at' | 'personal_status' | 'last_updated'. sort_dir: 'asc' | 'desc' (for last_updated)."""
     if not sort_val:
         return list(issues)
+    dir_asc = (sort_dir or "asc").strip().lower() != "desc"
     if sort_val == "cycle":
         return sort_issues_by_cycle(issues)
     if sort_val == "personal_priority":
@@ -502,11 +607,27 @@ def _apply_sort(issues, sort_val):
         ranked.sort(key=lambda i: i.get("personal_priority"))
         return ranked + sort_issues_by_cycle(unranked)
     if sort_val == "linear_priority":
-        return sorted(issues, key=lambda i: (i.get("linear_priority") or 0))
+        # Ascending: Urgent(1) → High(2) → Medium(3) → Low(4) → No Priority(0)
+        def linear_pri_key(i):
+            p = i.get("linear_priority") if i.get("linear_priority") is not None else 0
+            return (5 if p == 0 else p)
+        return sorted(issues, key=linear_pri_key)
     if sort_val == "linear_status":
         return sorted(issues, key=lambda i: (i.get("linear_status") or ""))
     if sort_val == "updated_at":
         return sorted(issues, key=lambda i: (i.get("updated_at") or ""), reverse=True)
+    if sort_val == "personal_status":
+        return sorted(issues, key=lambda i: (i.get("personal_status") or ""))
+    if sort_val == "last_updated":
+        # Ascending: oldest first, no-edit last. Descending: newest first, no-edit first.
+        def last_updated_key_asc(i):
+            lu = i.get("last_updated") or ""
+            return (0 if lu else 1, lu)
+        def last_updated_key_desc(i):
+            lu = i.get("last_updated") or ""
+            return (1 if lu else 0, lu)
+        key_fn = last_updated_key_desc if not dir_asc else last_updated_key_asc
+        return sorted(issues, key=key_fn, reverse=not dir_asc)
     return list(issues)
 
 
@@ -560,7 +681,10 @@ def api_issues():
         if sort_val is None and filter_val == "active":
             sort_val = "personal_priority"
         issues = _apply_filter(issues, filter_val)
-        issues = _apply_sort(issues, sort_val)
+        filter_config = _parse_filter_config_from_request()
+        issues = apply_issue_filters(issues, filter_config)
+        sort_dir = request.args.get("sort_dir")
+        issues = _apply_sort(issues, sort_val, sort_dir)
         last = get_last_fetched()
         return jsonify({"issues": issues, "last_fetched": last})
     except ValueError as e:
