@@ -112,6 +112,13 @@
     .badge.personal-status-waiting-on-review { background: var(--priority-low); color: #000; }
     .badge.personal-status-blocked { background: var(--priority-urgent); color: #fff; }
     .badge.personal-status-ready-to-close { background: var(--priority-low); color: #000; }
+    /* Linear Status badge colors (default gray for unmapped statuses) */
+    .badge.linear-status-in-progress { background: var(--status-amber); color: #000; }
+    .badge.linear-status-in-review { background: var(--priority-low); color: #000; }
+    .badge.linear-status-todo { background: var(--status-desaturated-blue); color: #fff; }
+    .badge.linear-status-backlog { background: var(--status-light-gray); color: var(--bg); }
+    .badge.linear-status-triage { background: var(--priority-high); color: #fff; }
+    .badge.linear-status-blocked { background: var(--priority-urgent); color: #fff; }
     .notes-cell { cursor: pointer; }
     .notes-preview {
       max-width: 220px;
@@ -425,6 +432,13 @@
 
       function linearPriorityLabel(p) {
         return priorityLabels[p] != null ? priorityLabels[p] : '—';
+      }
+      function linearStatusBadgeClass(status) {
+        var s = (status || '').trim();
+        if (s === '') return '';
+        var slug = s.toLowerCase().replace(/\s+/g, '-');
+        var map = { 'in-progress': 'in-progress', 'in-review': 'in-review', 'todo': 'todo', 'backlog': 'backlog', 'triage': 'triage', 'blocked': 'blocked' };
+        return map[slug] || '';
       }
       function personalStatusBadgeClass(status) {
         var s = (status || '').trim();
@@ -869,7 +883,12 @@
           return escapeHtml(issue.title || '—');
         }
         if (colId === 'linear_status') {
-          return escapeHtml(issue.linear_status || '—');
+          var ls = issue.linear_status || '';
+          var lsBadgeClass = linearStatusBadgeClass(ls);
+          if (lsBadgeClass) {
+            return '<span class="badge linear-status-' + escapeHtml(lsBadgeClass) + '">' + escapeHtml(ls || '—') + '</span>';
+          }
+          return escapeHtml(ls || '—');
         }
         if (colId === 'linear_priority') {
           var p = issue.linear_priority != null ? issue.linear_priority : 0;
