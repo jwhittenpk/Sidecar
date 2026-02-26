@@ -912,6 +912,9 @@ def api_overlay_save(issue_id):
             else:
                 try:
                     n = int(pri)
+                    # When changing an existing priority (move to lower position), remove first so we close the gap, then assign. Otherwise assigning would "insert" and push others down.
+                    if overlay.get(key, {}).get("personal_priority") is not None:
+                        overlay = rebalance_overlay_after_remove(overlay, issue_id)
                     new_overlay = rebalance_overlay_after_assign(overlay, issue_id, n)
                 except (TypeError, ValueError):
                     new_overlay = overlay
@@ -923,6 +926,9 @@ def api_overlay_save(issue_id):
             new_overlay[key] = new_overlay.get(key, {})
             new_overlay[key]["last_updated"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
             write_overlay(new_overlay)
+            # Invalidate cache so next GET /api/issues (e.g. after browser refresh) re-reads overlay from disk
+            global _issues_cache
+            _issues_cache = None
             entry = new_overlay[key]
             return jsonify({"ok": True, "entry": entry, "overlay": new_overlay})
         else:
