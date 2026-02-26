@@ -1,3 +1,10 @@
+## v0.1.5
+
+- Merge pull request #8 from jwhittenpk/feature/Sidecar-7
+- Sidecar-7: feat: New Personal Status colors
+- Sidecar-7: feat: add new personal status values (Testing, Pair Testing, Waiting on Testing)
+- chore: update CHANGELOG for v0.1.4
+
 ## v0.1.4
 
 - Merge pull request #7 from jwhittenpk/feature/Sidecar-6
