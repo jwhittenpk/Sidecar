@@ -1,3 +1,9 @@
+## v0.2.2
+
+- Merge pull request #11 from jwhittenpk/feature/sidecar-10
+- Sidecar-10: feat: add Linear Status badge colors
+- chore: update CHANGELOG and VERSION for v0.2.1
+
 ## v0.2.1
 
 - Merge pull request #10 from jwhittenpk/feature/Sidecar-9
