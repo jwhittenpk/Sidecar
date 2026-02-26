@@ -399,6 +399,27 @@ def test_apply_issue_filters_personal_status():
     assert "LIN-3" in ids
 
 
+def test_apply_issue_filters_personal_status_new_statuses():
+    """Filtering by each of the three new personal statuses returns the correct issues."""
+    issues = [
+        {"id": "u1", "identifier": "LIN-1", "title": "A", "linear_status": "Todo", "linear_priority": 2,
+         "personal_status": "Testing", "personal_priority": None, "last_updated": None, "is_completed": False},
+        {"id": "u2", "identifier": "LIN-2", "title": "B", "linear_status": "Todo", "linear_priority": 2,
+         "personal_status": "Pair Testing", "personal_priority": None, "last_updated": None, "is_completed": False},
+        {"id": "u3", "identifier": "LIN-3", "title": "C", "linear_status": "Todo", "linear_priority": 2,
+         "personal_status": "Waiting on Testing", "personal_priority": None, "last_updated": None, "is_completed": False},
+    ]
+    result_testing = app_module.apply_issue_filters(issues, {"personal_statuses": ["Testing"]})
+    assert len(result_testing) == 1
+    assert result_testing[0]["identifier"] == "LIN-1"
+    result_pair = app_module.apply_issue_filters(issues, {"personal_statuses": ["Pair Testing"]})
+    assert len(result_pair) == 1
+    assert result_pair[0]["identifier"] == "LIN-2"
+    result_waiting = app_module.apply_issue_filters(issues, {"personal_statuses": ["Waiting on Testing"]})
+    assert len(result_waiting) == 1
+    assert result_waiting[0]["identifier"] == "LIN-3"
+
+
 def test_apply_issue_filters_and_logic():
     """Multiple filters combined with AND: only issues matching all criteria."""
     issues = _merged_issues_fixture()
@@ -491,3 +512,38 @@ def test_get_api_issues_filter_no_matches_returns_200_empty_list(mock_linear_fet
     data = resp.get_json()
     assert data["issues"] == []
     assert "last_fetched" in data
+
+
+def test_get_api_personal_status_options_includes_new_statuses_in_order():
+    """GET /api/personal-status-options returns all statuses including new ones in correct display order."""
+    client = app_module.app.test_client()
+    resp = client.get("/api/personal-status-options")
+    assert resp.status_code == 200
+    opts = resp.get_json()
+    assert isinstance(opts, list)
+    assert "Testing" in opts
+    assert "Pair Testing" in opts
+    assert "Waiting on Testing" in opts
+    idx_in_progress = opts.index("In Progress")
+    idx_testing = opts.index("Testing")
+    idx_pair = opts.index("Pair Testing")
+    idx_waiting_testing = opts.index("Waiting on Testing")
+    idx_waiting_someone = opts.index("Waiting On Someone")
+    assert idx_testing > idx_in_progress
+    assert idx_pair > idx_testing
+    assert idx_waiting_testing > idx_pair
+    assert idx_waiting_someone > idx_waiting_testing
+
+
+def test_post_api_overlay_invalid_personal_status_returns_400(temp_overlay_path, mock_linear_fetch):
+    """POST /api/overlay/<id> with invalid personal_status returns 400 and error message."""
+    client = app_module.app.test_client()
+    resp = client.post(
+        "/api/overlay/LIN-1",
+        data=json.dumps({"personal_status": "Invalid Status"}),
+        content_type="application/json",
+    )
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert "error" in data
+    assert "personal_status" in data["error"].lower() or "invalid" in data["error"].lower()

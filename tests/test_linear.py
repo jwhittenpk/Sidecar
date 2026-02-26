@@ -375,15 +375,15 @@ def test_sort_personal_priority_unset_last_ascending():
 
 
 def test_sort_personal_status_ascending():
-    """Sort by personal_status ascending (alphabetical)."""
+    """Sort by personal_status ascending (display order from PERSONAL_STATUS_OPTIONS)."""
     issues = [
         _issue_with_overlay("LIN-b", personal_status="Blocked"),
         _issue_with_overlay("LIN-a", personal_status=""),
         _issue_with_overlay("LIN-c", personal_status="In Progress"),
     ]
     result = app_module._apply_sort(issues, "personal_status")
-    # Empty string sorts before "Blocked" and "In Progress"
-    assert [r["personal_status"] for r in result] == ["", "Blocked", "In Progress"]
+    # Display order: "" (No Status) < In Progress < Blocked
+    assert [r["personal_status"] for r in result] == ["", "In Progress", "Blocked"]
 
 
 def test_sort_updated_at_descending():

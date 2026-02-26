@@ -43,6 +43,17 @@ def test_write_entry_creates_file(temp_overlay_path):
     assert "last_updated" in data["LIN-1"]
 
 
+@pytest.mark.parametrize("status", ["Testing", "Pair Testing", "Waiting on Testing"])
+def test_write_entry_saves_new_personal_statuses(temp_overlay_path, status):
+    """Each of the three new personal status values can be saved to overlay.json without error."""
+    app_module.write_overlay_entry("LIN-1", {"personal_status": status})
+    assert temp_overlay_path.exists()
+    with open(temp_overlay_path, encoding="utf-8") as f:
+        data = json.load(f)
+    assert "LIN-1" in data
+    assert data["LIN-1"]["personal_status"] == status
+
+
 def test_write_second_entry_preserves_first(temp_overlay_path):
     """Writing a second overlay entry preserves the first."""
     app_module.write_overlay_entry("LIN-1", {"notes": "First"})

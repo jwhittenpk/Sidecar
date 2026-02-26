@@ -17,6 +17,9 @@
       --priority-medium: #d29922;
       --priority-low: #3fb950;
       --priority-none: #8b949e;
+      --status-teal: #39c5cf;
+      --status-purple: #a371f7;
+      --status-amber: #d29922;
     }
     * { box-sizing: border-box; }
     body {
@@ -94,6 +97,17 @@
     .priority-2 { background: var(--priority-high); color: #fff; }
     .priority-3 { background: var(--priority-medium); color: #000; }
     .priority-4 { background: var(--priority-low); color: #000; }
+    .badge.personal-status-none { background: var(--priority-none); color: var(--bg); }
+    .badge.personal-status-not-started { background: var(--text-muted); color: var(--bg); }
+    .badge.personal-status-in-progress { background: var(--link); color: #fff; }
+    .badge.personal-status-testing { background: var(--status-teal); color: #000; }
+    .badge.personal-status-pair-testing { background: var(--status-purple); color: #fff; }
+    .badge.personal-status-waiting-on-testing { background: var(--status-amber); color: #000; }
+    .badge.personal-status-waiting-on-someone { background: var(--status-amber); color: #000; }
+    .badge.personal-status-waiting-on-me { background: var(--text-muted); color: var(--bg); }
+    .badge.personal-status-waiting-on-review { background: var(--text-muted); color: var(--bg); }
+    .badge.personal-status-blocked { background: var(--priority-urgent); color: #fff; }
+    .badge.personal-status-ready-to-close { background: var(--priority-low); color: #000; }
     .notes-cell { cursor: pointer; }
     .notes-preview {
       max-width: 220px;
@@ -410,6 +424,11 @@
       function linearPriorityLabel(p) {
         return priorityLabels[p] != null ? priorityLabels[p] : '—';
       }
+      function personalStatusBadgeClass(status) {
+        var s = (status || '').trim();
+        if (s === '') return 'none';
+        return s.toLowerCase().replace(/\s+/g, '-');
+      }
 
       function clientSortKeyLinearPriority(p) {
         var v = p != null ? p : 0;
@@ -506,12 +525,16 @@
           const notesFirstLine = (issue.notes || '').split('\n')[0].trim();
           const notesPreview = notesFirstLine ? notesFirstLine.substring(0, 60) + (notesFirstLine.length > 60 ? '…' : '') : '';
           const priorityClass = 'priority-' + (issue.linear_priority != null ? issue.linear_priority : 0);
+          const ps = issue.personal_status || '';
+          const psLabel = ps === '' ? 'No status' : ps;
+          const psBadgeClass = personalStatusBadgeClass(ps);
+          const psHtml = psBadgeClass ? '<span class="badge personal-status-' + escapeHtml(psBadgeClass) + '">' + escapeHtml(psLabel) + '</span>' : escapeHtml(psLabel);
           tr.innerHTML =
             '<td><a href="' + (issue.url || '#') + '" target="_blank" rel="noopener">' + escapeHtml(issue.identifier || issue.id) + ': ' + escapeHtml(issue.title || '') + '</a></td>' +
             '<td>' + escapeHtml(issue.linear_status || '—') + '</td>' +
             '<td><span class="badge ' + priorityClass + '">' + escapeHtml(linearPriorityLabel(issue.linear_priority)) + '</span></td>' +
             '<td>' + (issue.personal_priority != null && issue.personal_priority !== '' ? issue.personal_priority : 'Not set') + '</td>' +
-            '<td>' + escapeHtml(issue.personal_status || 'No status') + '</td>' +
+            '<td>' + psHtml + '</td>' +
             '<td class="notes-cell"><span class="notes-preview" data-issue-id="' + escapeHtml(issue.identifier || issue.id) + '">' + (notesPreview || 'Add notes…') + '</span></td>' +
             (function() {
               const linearUpdated = issue.updated_at;
