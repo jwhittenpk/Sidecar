@@ -474,9 +474,10 @@
       function filteredAndSortedIssues() {
         var q = (searchEl.value || '').trim().toLowerCase();
         var list = !q ? allIssues : allIssues.filter(function(issue) {
+          var identifier = (issue.identifier || issue.id || '').toString().toLowerCase();
           var title = (issue.title || '').toLowerCase();
           var notes = (issue.notes || '').toLowerCase();
-          return title.includes(q) || notes.includes(q);
+          return identifier.includes(q) || title.includes(q) || notes.includes(q);
         });
         return sortIssuesClientSide(list, sortColumn, sortDir);
       }
