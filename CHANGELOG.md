@@ -1,3 +1,10 @@
+## v0.2.1
+
+- Merge pull request #10 from jwhittenpk/feature/Sidecar-9
+- Sidecar-9: test: unit tests for move-to-last and cache invalidation; docs: README features and project structure
+- Sidecar-9: fix: personal priority reorder, dropdown size, overlay sync, and cache invalidation
+- chore: update CHANGELOG and VERSION for v0.2.0
+
 ## v0.2.0
 
 - Merge pull request #9 from jwhittenpk/feature/Sidecar-8
