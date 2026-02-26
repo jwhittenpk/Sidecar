@@ -547,3 +547,109 @@ def test_post_api_overlay_invalid_personal_status_returns_400(temp_overlay_path,
     data = resp.get_json()
     assert "error" in data
     assert "personal_status" in data["error"].lower() or "invalid" in data["error"].lower()
+
+
+# --- GET/POST /api/config/columns ---
+
+
+def test_get_api_config_columns_returns_registry_and_visibility(temp_overlay_path):
+    """GET /api/config/columns returns column registry and default visibility (fresh install)."""
+    client = app_module.app.test_client()
+    resp = client.get("/api/config/columns")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert "columns" in data
+    assert "column_visibility" in data
+    columns = data["columns"]
+    assert isinstance(columns, list)
+    assert len(columns) >= 9
+    ids = [c["id"] for c in columns]
+    assert "identifier" in ids
+    assert "title" in ids
+    assert "linear_status" in ids
+    assert "cycle" in ids
+    assert "team" in ids
+    assert "labels" in ids
+    vis = data["column_visibility"]
+    assert vis.get("identifier") is True
+    assert vis.get("title") is True
+    assert vis.get("cycle") is False
+    assert vis.get("team") is False
+    assert vis.get("labels") is False
+
+
+def test_post_api_config_columns_updates_visibility(temp_overlay_path):
+    """POST /api/config/columns with valid body updates overlay and returns new visibility."""
+    client = app_module.app.test_client()
+    new_vis = {
+        "identifier": True,
+        "title": True,
+        "linear_status": True,
+        "linear_priority": True,
+        "personal_priority": True,
+        "personal_status": True,
+        "notes_preview": True,
+        "linear_updated": True,
+        "my_last_edit": True,
+        "cycle": True,
+        "team": False,
+        "labels": False,
+    }
+    resp = client.post(
+        "/api/config/columns",
+        data=json.dumps({"column_visibility": new_vis}),
+        content_type="application/json",
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["column_visibility"].get("cycle") is True
+    assert temp_overlay_path.exists()
+    with open(temp_overlay_path, encoding="utf-8") as f:
+        overlay = json.load(f)
+    assert app_module.COLUMN_VISIBILITY_KEY in overlay
+    assert overlay[app_module.COLUMN_VISIBILITY_KEY].get("cycle") is True
+
+
+def test_post_api_config_columns_rejects_hiding_identifier(temp_overlay_path):
+    """POST /api/config/columns with identifier false returns 400."""
+    client = app_module.app.test_client()
+    resp = client.post(
+        "/api/config/columns",
+        data=json.dumps({"column_visibility": {"identifier": False}}),
+        content_type="application/json",
+    )
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert "error" in data
+    assert "identifier" in data["error"].lower()
+
+
+def test_post_api_config_columns_rejects_hiding_title(temp_overlay_path):
+    """POST /api/config/columns with title false returns 400."""
+    client = app_module.app.test_client()
+    resp = client.post(
+        "/api/config/columns",
+        data=json.dumps({"column_visibility": {"title": False}}),
+        content_type="application/json",
+    )
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert "error" in data
+    assert "title" in data["error"].lower()
+
+
+def test_post_api_config_columns_rejects_only_identifier_title_visible(temp_overlay_path):
+    """POST /api/config/columns that would leave only identifier and title visible returns 400."""
+    client = app_module.app.test_client()
+    only_two = {
+        c["id"]: (c["id"] in ("identifier", "title"))
+        for c in app_module.COLUMN_REGISTRY
+    }
+    resp = client.post(
+        "/api/config/columns",
+        data=json.dumps({"column_visibility": only_two}),
+        content_type="application/json",
+    )
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert "error" in data

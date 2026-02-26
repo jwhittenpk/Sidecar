@@ -128,6 +128,32 @@ def test_normalize_issue_with_cycle():
     assert normalized["cycle"]["ends_at"] == "2025-02-14T23:59:59.000Z"
 
 
+def test_normalize_issue_with_labels():
+    """Labels are parsed from Linear API response as list of {name, color}."""
+    node = {
+        **LINEAR_NODE,
+        "labels": {
+            "nodes": [
+                {"id": "l1", "name": "bug", "color": "#d73a4a"},
+                {"id": "l2", "name": "frontend", "color": "#0075ca"},
+            ],
+        },
+    }
+    normalized = app_module._normalize_issue(node)
+    assert "labels" in normalized
+    assert len(normalized["labels"]) == 2
+    assert normalized["labels"][0]["name"] == "bug"
+    assert normalized["labels"][0]["color"] == "#d73a4a"
+    assert normalized["labels"][1]["name"] == "frontend"
+    assert normalized["labels"][1]["color"] == "#0075ca"
+
+
+def test_normalize_issue_labels_empty():
+    """Missing or empty labels yields empty list."""
+    normalized = app_module._normalize_issue(LINEAR_NODE)
+    assert normalized.get("labels") == []
+
+
 # --- sort_issues_by_cycle tests (use merged-issue shaped dicts with cycle, linear_priority, etc.)
 
 
@@ -421,3 +447,48 @@ def test_sort_last_updated_descending_no_edit_first():
     assert result[0]["identifier"] == "LIN-new"
     assert result[1]["identifier"] == "LIN-old"
     assert result[2]["identifier"] == "LIN-no-edit"
+
+
+def test_sort_cycle_by_name_no_cycle_at_bottom():
+    """Sort by cycle column: alphabetical by cycle name; issues with no cycle sink to bottom."""
+    issues = [
+        _issue("LIN-nocycle", cycle=None),
+        _issue("LIN-b", cycle={"id": "c2", "name": "Beta", "number": 2, "starts_at": None, "ends_at": None}),
+        _issue("LIN-a", cycle={"id": "c1", "name": "Alpha", "number": 1, "starts_at": None, "ends_at": None}),
+    ]
+    result = app_module._apply_sort(issues, "cycle", "asc")
+    assert result[0]["identifier"] == "LIN-a"
+    assert (result[0].get("cycle") or {}).get("name") == "Alpha"
+    assert result[1]["identifier"] == "LIN-b"
+    assert result[2]["identifier"] == "LIN-nocycle"
+    assert result[2].get("cycle") is None
+
+
+def test_sort_labels_by_first_name_no_labels_at_bottom():
+    """Sort by labels column: alphabetical by first label name; no-label issues at bottom."""
+    i1 = _issue("LIN-nolabels")
+    i1["labels"] = []
+    i2 = _issue("LIN-b")
+    i2["labels"] = [{"name": "zebra", "color": "#fff"}]
+    i3 = _issue("LIN-a")
+    i3["labels"] = [{"name": "alpha", "color": "#fff"}]
+    issues = [i1, i2, i3]
+    result = app_module._apply_sort(issues, "labels", "asc")
+    assert result[0]["identifier"] == "LIN-a"
+    assert result[1]["identifier"] == "LIN-b"
+    assert result[2]["identifier"] == "LIN-nolabels"
+
+
+def test_sort_team_alphabetical():
+    """Sort by team column: alphabetical by team name."""
+    issues = [
+        _issue("LIN-c", linear_priority=2),
+        _issue("LIN-a", linear_priority=2),
+        _issue("LIN-b", linear_priority=2),
+    ]
+    # _issue doesn't set team_name; we need to add it
+    for i, tid in zip(issues, ["Team C", "Team A", "Team B"]):
+        i["team_name"] = tid
+    result = app_module._apply_sort(issues, "team", "asc")
+    assert [r["identifier"] for r in result] == ["LIN-a", "LIN-b", "LIN-c"]
+    assert [r["team_name"] for r in result] == ["Team A", "Team B", "Team C"]

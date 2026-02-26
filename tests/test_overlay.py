@@ -218,3 +218,55 @@ def test_change_existing_priority_rebalances():
     assert result["LIN-3"]["personal_priority"] == 1
     assert result["LIN-1"]["personal_priority"] == 2
     assert result["LIN-2"]["personal_priority"] == 3
+
+
+# --- column_visibility in overlay.json ---
+
+
+def test_column_visibility_written_and_read(temp_overlay_path):
+    """column_visibility key is written and read correctly from overlay.json."""
+    vis = {
+        "linear_status": True,
+        "cycle": False,
+        "team": True,
+    }
+    app_module.write_column_visibility(vis)
+    assert temp_overlay_path.exists()
+    with open(temp_overlay_path, encoding="utf-8") as f:
+        data = json.load(f)
+    assert app_module.COLUMN_VISIBILITY_KEY in data
+    assert data[app_module.COLUMN_VISIBILITY_KEY]["linear_status"] is True
+    assert data[app_module.COLUMN_VISIBILITY_KEY]["cycle"] is False
+    assert data[app_module.COLUMN_VISIBILITY_KEY]["team"] is True
+    read_vis = app_module.get_column_visibility()
+    assert read_vis.get("linear_status") is True
+    assert read_vis.get("cycle") is False
+
+
+def test_column_visibility_missing_returns_defaults(temp_overlay_path):
+    """Missing column_visibility key on load returns defaults without error."""
+    app_module.write_overlay({"LIN-1": {"notes": "x"}})
+    vis = app_module.get_column_visibility()
+    assert isinstance(vis, dict)
+    assert vis.get("identifier") is True
+    assert vis.get("title") is True
+    assert vis.get("cycle") is False
+
+
+def test_column_visibility_does_not_affect_issue_overlay(temp_overlay_path):
+    """Issue-level overlay data is unaffected by column visibility reads/writes."""
+    app_module.write_overlay({
+        app_module.COLUMN_VISIBILITY_KEY: {"cycle": True},
+        "LIN-1": {"personal_priority": 1, "notes": "Note 1", "last_updated": "2025-02-01T12:00:00"},
+    })
+    overlay = app_module.read_overlay()
+    assert "LIN-1" in overlay
+    assert overlay["LIN-1"]["notes"] == "Note 1"
+    assert overlay["LIN-1"]["personal_priority"] == 1
+    merged = app_module.merge_issues(
+        [{"id": "u1", "identifier": "LIN-1", "title": "T"}],
+        overlay,
+    )
+    assert len(merged) == 1
+    assert merged[0]["notes"] == "Note 1"
+    assert merged[0]["personal_priority"] == 1

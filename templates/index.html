@@ -224,6 +224,15 @@
     .th-sortable { cursor: pointer; user-select: none; white-space: nowrap; }
     .th-sortable:hover { color: var(--text); }
     .th-sortable .sort-indicator { margin-left: 0.25rem; opacity: 0.7; }
+    .column-popover { position: absolute; top: 100%; left: 0; margin-top: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; min-width: 260px; max-width: 90vw; box-shadow: 0 8px 24px rgba(0,0,0,0.4); z-index: 50; display: none; }
+    .column-popover.open { display: block; }
+    .column-popover .column-list { max-height: 280px; overflow-y: auto; }
+    .column-popover .column-list label { display: flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; color: var(--text); margin: 0.25rem 0; cursor: pointer; }
+    .column-popover .column-list label.disabled { opacity: 0.7; cursor: default; }
+    .column-popover .column-list input[type="checkbox"] { margin: 0; }
+    .column-popover .column-actions { margin-top: 0.75rem; }
+    .column-popover .column-message { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem; }
+    .label-badge { display: inline-block; padding: 0.15rem 0.4rem; border-radius: 4px; font-size: 0.7rem; margin-right: 0.25rem; margin-bottom: 0.15rem; }
   </style>
 </head>
 <body>
@@ -239,43 +248,28 @@
   </div>
   <div class="controls">
     <div class="filter-btn-wrap">
+      <button type="button" id="gear-btn" title="Column visibility">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+      <div class="column-popover" id="column-popover">
+        <div class="column-list" id="column-list"></div>
+        <div class="column-message" id="column-message" style="display: none;"></div>
+        <div class="column-actions">
+          <button type="button" id="column-reset">Reset to Default</button>
+        </div>
+      </div>
+    </div>
+    <div class="filter-btn-wrap">
       <button type="button" id="filter-btn" title="Filter issues">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
       </button>
       <span class="filter-badge" id="filter-badge" aria-hidden="true"></span>
       <div class="filter-popover" id="filter-popover">
-      <div class="filter-section">
-        <label>Linear Updated — From</label>
-        <input type="date" id="filter-date-from">
-      </div>
-      <div class="filter-section">
-        <label>Linear Updated — To</label>
-        <input type="date" id="filter-date-to">
-      </div>
-      <div class="filter-section">
-        <label>Linear Status</label>
-        <div class="checkbox-list" id="filter-linear-status"></div>
-      </div>
-      <div class="filter-section">
-        <label>Linear Priority</label>
-        <div class="checkbox-list" id="filter-linear-priority"></div>
-      </div>
-      <div class="filter-section">
-        <label>Personal Priority</label>
-        <select id="filter-personal-priority">
-          <option value="all">All</option>
-          <option value="set">Set</option>
-          <option value="unset">Unset</option>
-        </select>
-      </div>
-      <div class="filter-section">
-        <label>Personal Status</label>
-        <div class="checkbox-list" id="filter-personal-status"></div>
-      </div>
-      <div class="filter-actions">
-        <button type="button" id="filter-clear">Clear All</button>
-        <button type="button" id="filter-apply" class="primary">Apply</button>
-      </div>
+        <div id="filter-sections"></div>
+        <div class="filter-actions">
+          <button type="button" id="filter-clear">Clear All</button>
+          <button type="button" id="filter-apply" class="primary">Apply</button>
+        </div>
       </div>
     </div>
     <label>Search:</label>
@@ -287,16 +281,7 @@
   <div id="empty" class="empty" style="display: none;">No issues match filters.</div>
   <table id="issues-table" style="display: none;">
     <thead>
-      <tr>
-        <th>Issue</th>
-        <th class="th-sortable" data-sort-column="linear_status" id="th-linear-status">Linear status <span class="sort-indicator"></span></th>
-        <th class="th-sortable" data-sort-column="linear_priority" id="th-linear-priority">Linear priority <span class="sort-indicator"></span></th>
-        <th class="th-sortable" data-sort-column="personal_priority" id="th-personal-priority">Personal priority <span class="sort-indicator"></span></th>
-        <th class="th-sortable" data-sort-column="personal_status" id="th-personal-status">Personal status <span class="sort-indicator"></span></th>
-        <th>Notes</th>
-        <th class="th-sortable" data-sort-column="updated_at" id="th-updated-at">Linear Updated <span class="sort-indicator"></span></th>
-        <th class="th-sortable" data-sort-column="last_updated" id="th-last-updated">My Last Edit <span class="sort-indicator"></span></th>
-      </tr>
+      <tr id="issues-thead-row"></tr>
     </thead>
     <tbody id="issues-body"></tbody>
   </table>
@@ -330,6 +315,8 @@
       let allIssues = [];
       let priorityLabels = {};
       let personalStatusOptions = [];
+      let columns = [];
+      let columnVisibility = {};
       let editingIssueId = null;
       let filterConfig = {
         date_from: '',
@@ -337,7 +324,10 @@
         linear_statuses: [],
         linear_priorities: [],
         personal_priority_filter: 'all',
-        personal_statuses: []
+        personal_statuses: [],
+        cycles: [],
+        teams: [],
+        labels: []
       };
       let sortColumn = 'personal_priority';
       let sortDir = 'asc';
@@ -353,15 +343,14 @@
       const tableEl = document.getElementById('issues-table');
       const tbody = document.getElementById('issues-body');
       const modalEl = document.getElementById('modal');
+      const gearBtn = document.getElementById('gear-btn');
+      const columnPopover = document.getElementById('column-popover');
+      const columnList = document.getElementById('column-list');
+      const columnMessage = document.getElementById('column-message');
       const filterBtn = document.getElementById('filter-btn');
       const filterBadge = document.getElementById('filter-badge');
       const filterPopover = document.getElementById('filter-popover');
-      const filterDateFrom = document.getElementById('filter-date-from');
-      const filterDateTo = document.getElementById('filter-date-to');
-      const filterLinearStatus = document.getElementById('filter-linear-status');
-      const filterLinearPriority = document.getElementById('filter-linear-priority');
-      const filterPersonalPriority = document.getElementById('filter-personal-priority');
-      const filterPersonalStatus = document.getElementById('filter-personal-status');
+      const filterSections = document.getElementById('filter-sections');
       const filterClearBtn = document.getElementById('filter-clear');
       const filterApplyBtn = document.getElementById('filter-apply');
       const modalTitle = document.getElementById('modal-title');
@@ -450,7 +439,19 @@
       function sortIssuesClientSide(list, column, dir) {
         var asc = dir === 'asc';
         var arr = list.slice();
-        if (column === 'linear_status') {
+        if (column === 'identifier') {
+          arr.sort(function(a, b) {
+            var sa = (a.identifier || a.id || '').toString();
+            var sb = (b.identifier || b.id || '').toString();
+            var c = sa.localeCompare(sb);
+            return asc ? c : -c;
+          });
+        } else if (column === 'title') {
+          arr.sort(function(a, b) {
+            var sa = (a.title || '').localeCompare(b.title || '');
+            return asc ? sa : -sa;
+          });
+        } else if (column === 'linear_status') {
           arr.sort(function(a, b) {
             var sa = (a.linear_status || '').localeCompare(b.linear_status || '');
             return asc ? sa : -sa;
@@ -472,14 +473,19 @@
             var sa = (a.personal_status || '').localeCompare(b.personal_status || '');
             return asc ? sa : -sa;
           });
-        } else if (column === 'updated_at') {
+        } else if (column === 'notes_preview') {
+          arr.sort(function(a, b) {
+            var sa = (a.notes || '').localeCompare(b.notes || '');
+            return asc ? sa : -sa;
+          });
+        } else if (column === 'updated_at' || column === 'linear_updated') {
           arr.sort(function(a, b) {
             var ua = a.updated_at || '';
             var ub = b.updated_at || '';
             var c = ua.localeCompare(ub);
             return asc ? c : -c;
           });
-        } else if (column === 'last_updated') {
+        } else if (column === 'last_updated' || column === 'my_last_edit') {
           arr.sort(function(a, b) {
             var ua = a.last_updated || '';
             var ub = b.last_updated || '';
@@ -487,6 +493,25 @@
             if (!ua) return asc ? 1 : -1;
             if (!ub) return asc ? -1 : 1;
             var c = ua.localeCompare(ub);
+            return asc ? c : -c;
+          });
+        } else if (column === 'cycle') {
+          arr.sort(function(a, b) {
+            var na = (a.cycle && a.cycle.name) ? a.cycle.name : '';
+            var nb = (b.cycle && b.cycle.name) ? b.cycle.name : '';
+            var c = na.localeCompare(nb);
+            return asc ? c : -c;
+          });
+        } else if (column === 'team') {
+          arr.sort(function(a, b) {
+            var sa = (a.team_name || '').localeCompare(b.team_name || '');
+            return asc ? sa : -sa;
+          });
+        } else if (column === 'labels') {
+          arr.sort(function(a, b) {
+            var la = (a.labels && a.labels[0]) ? (a.labels[0].name || '') : '';
+            var lb = (b.labels && b.labels[0]) ? (b.labels[0].name || '') : '';
+            var c = la.localeCompare(lb);
             return asc ? c : -c;
           });
         }
@@ -514,7 +539,8 @@
       }
 
       function renderTable() {
-        const list = filteredAndSortedIssues();
+        var list = filteredAndSortedIssues();
+        var visible = getVisibleColumns();
         tbody.innerHTML = '';
         if (list.length === 0) {
           emptyEl.style.display = 'block';
@@ -523,36 +549,14 @@
         }
         emptyEl.style.display = 'none';
         list.forEach(function(issue) {
-          const tr = document.createElement('tr');
+          var tr = document.createElement('tr');
           if (issue.is_completed) tr.classList.add('completed');
-          const notesFirstLine = (issue.notes || '').split('\n')[0].trim();
-          const notesPreview = notesFirstLine ? notesFirstLine.substring(0, 60) + (notesFirstLine.length > 60 ? '…' : '') : '';
-          const priorityClass = 'priority-' + (issue.linear_priority != null ? issue.linear_priority : 0);
-          const ps = issue.personal_status || '';
-          const psLabel = ps === '' ? 'No status' : ps;
-          const psBadgeClass = personalStatusBadgeClass(ps);
-          const psHtml = psBadgeClass ? '<span class="badge personal-status-' + escapeHtml(psBadgeClass) + '">' + escapeHtml(psLabel) + '</span>' : escapeHtml(psLabel);
-          tr.innerHTML =
-            '<td><a href="' + (issue.url || '#') + '" target="_blank" rel="noopener">' + escapeHtml(issue.identifier || issue.id) + ': ' + escapeHtml(issue.title || '') + '</a></td>' +
-            '<td>' + escapeHtml(issue.linear_status || '—') + '</td>' +
-            '<td><span class="badge ' + priorityClass + '">' + escapeHtml(linearPriorityLabel(issue.linear_priority)) + '</span></td>' +
-            '<td>' + (issue.personal_priority != null && issue.personal_priority !== '' ? issue.personal_priority : 'Not set') + '</td>' +
-            '<td>' + psHtml + '</td>' +
-            '<td class="notes-cell"><span class="notes-preview" data-issue-id="' + escapeHtml(issue.identifier || issue.id) + '">' + (notesPreview || 'Add notes…') + '</span></td>' +
-            (function() {
-              const linearUpdated = issue.updated_at;
-              const rel = formatRelativeDate(linearUpdated);
-              const tooltip = formatDateTime(linearUpdated);
-              const titleAttr = tooltip ? ' title="' + escapeHtml(tooltip) + '"' : '';
-              return '<td' + titleAttr + '>' + (rel || '—') + '</td>';
-            })() +
-            (function() {
-              const myEdit = issue.last_updated;
-              if (!myEdit) return '<td>—</td>';
-              const rel = formatRelativeDate(myEdit);
-              const tooltip = formatDateTime(myEdit);
-              return '<td title="' + escapeHtml(tooltip) + '">' + escapeHtml(rel) + '</td>';
-            })();
+          visible.forEach(function(col) {
+            var td = document.createElement('td');
+            if (col.id === 'notes_preview') td.classList.add('notes-cell');
+            td.innerHTML = cellContent(issue, col.id);
+            tr.appendChild(td);
+          });
           tbody.appendChild(tr);
         });
       }
@@ -589,6 +593,279 @@
         editingIssueId = null;
       }
 
+      function getVisibleColumns() {
+        return columns.filter(function(c) { return columnVisibility[c.id]; });
+      }
+
+      function buildColumnPopover() {
+        columnList.innerHTML = '';
+        columns.forEach(function(col) {
+          var label = document.createElement('label');
+          var disabled = (col.id === 'identifier' || col.id === 'title');
+          if (disabled) label.classList.add('disabled');
+          var cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.dataset.columnId = col.id;
+          cb.checked = columnVisibility[col.id];
+          cb.disabled = disabled;
+          cb.addEventListener('change', function() {
+            if (disabled) return;
+            var next = Object.assign({}, columnVisibility, { [col.id]: cb.checked });
+            var visibleCount = Object.keys(next).filter(function(k) { return next[k]; }).length;
+            if (visibleCount <= 2) {
+              columnMessage.style.display = 'block';
+              columnMessage.textContent = 'At least one column besides Issue and Title must remain visible.';
+              cb.checked = true;
+              return;
+            }
+            columnMessage.style.display = 'none';
+            columnVisibility = next;
+            fetch('/api/config/columns', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ column_visibility: columnVisibility })
+            }).then(function(r) { return r.json(); }).then(function(data) {
+              if (data.column_visibility) columnVisibility = data.column_visibility;
+              buildThead();
+              buildFilterPopover();
+              clearFiltersForHiddenColumns();
+              updateFilterBadge();
+              renderTable();
+            }).catch(function() {});
+          });
+          label.appendChild(cb);
+          label.appendChild(document.createTextNode(' ' + col.label));
+          columnList.appendChild(label);
+        });
+      }
+
+      function clearFiltersForHiddenColumns() {
+        var visible = getVisibleColumns();
+        var visibleIds = {};
+        visible.forEach(function(c) { visibleIds[c.id] = true; });
+        if (!visibleIds.linear_status) filterConfig.linear_statuses = [];
+        if (!visibleIds.linear_priority) filterConfig.linear_priorities = [];
+        if (!visibleIds.personal_priority) filterConfig.personal_priority_filter = 'all';
+        if (!visibleIds.personal_status) filterConfig.personal_statuses = [];
+        if (!visibleIds.linear_updated) { filterConfig.date_from = ''; filterConfig.date_to = ''; }
+        if (!visibleIds.cycle) filterConfig.cycles = [];
+        if (!visibleIds.team) filterConfig.teams = [];
+        if (!visibleIds.labels) filterConfig.labels = [];
+      }
+
+      function buildFilterPopover() {
+        filterSections.innerHTML = '';
+        var visible = getVisibleColumns();
+        var filterable = visible.filter(function(c) { return c.filterable; });
+        filterable.forEach(function(col) {
+          var section = document.createElement('div');
+          section.className = 'filter-section';
+          section.dataset.columnId = col.id;
+          var labelEl = document.createElement('label');
+          labelEl.textContent = col.label + (col.filter_type === 'daterange' ? ' — From' : '');
+          section.appendChild(labelEl);
+          if (col.filter_type === 'daterange' && col.id === 'linear_updated') {
+            var fromInput = document.createElement('input');
+            fromInput.type = 'date';
+            fromInput.id = 'filter-date-from';
+            section.appendChild(fromInput);
+            var toLabel = document.createElement('label');
+            toLabel.textContent = col.label + ' — To';
+            toLabel.style.marginTop = '0.5rem';
+            section.appendChild(toLabel);
+            var toInput = document.createElement('input');
+            toInput.type = 'date';
+            toInput.id = 'filter-date-to';
+            section.appendChild(toInput);
+          } else if (col.filter_type === 'toggle' && col.id === 'personal_priority') {
+            var sel = document.createElement('select');
+            sel.id = 'filter-personal-priority';
+            sel.innerHTML = '<option value="all">All</option><option value="set">Set</option><option value="unset">Unset</option>';
+            section.appendChild(sel);
+          } else if (col.filter_type === 'multiselect') {
+            var listDiv = document.createElement('div');
+            listDiv.className = 'checkbox-list';
+            listDiv.id = 'filter-' + col.id;
+            section.appendChild(listDiv);
+          }
+          filterSections.appendChild(section);
+        });
+        populateFilterControls();
+      }
+
+      function populateFilterControls() {
+        var filterable = getVisibleColumns().filter(function(c) { return c.filterable; });
+        filterable.forEach(function(col) {
+          var listEl = document.getElementById('filter-' + col.id);
+          if (!listEl || col.filter_type !== 'multiselect') return;
+          listEl.innerHTML = '';
+          var values = [];
+          if (col.id === 'linear_status') {
+            allIssues.forEach(function(i) {
+              var s = (i.linear_status || '').trim();
+              if (s && values.indexOf(s) === -1) values.push(s);
+            });
+            values.sort();
+            values.forEach(function(s) {
+              var label = document.createElement('label');
+              var cb = document.createElement('input');
+              cb.type = 'checkbox';
+              cb.value = s;
+              label.appendChild(cb);
+              label.appendChild(document.createTextNode(' ' + s));
+              listEl.appendChild(label);
+            });
+          } else if (col.id === 'linear_priority') {
+            [1, 2, 3, 4, 0].forEach(function(p) {
+              var label = document.createElement('label');
+              var cb = document.createElement('input');
+              cb.type = 'checkbox';
+              cb.value = String(p);
+              label.appendChild(cb);
+              label.appendChild(document.createTextNode(' ' + (priorityLabels[p] || 'Priority ' + p)));
+              listEl.appendChild(label);
+            });
+          } else if (col.id === 'personal_status') {
+            (personalStatusOptions || []).forEach(function(o) {
+              var label = document.createElement('label');
+              var cb = document.createElement('input');
+              cb.type = 'checkbox';
+              cb.value = (o === '' || o === undefined) ? '__empty__' : o;
+              label.appendChild(cb);
+              label.appendChild(document.createTextNode(' ' + (o === '' || o === undefined ? 'No status' : o)));
+              listEl.appendChild(label);
+            });
+          } else if (col.id === 'cycle') {
+            allIssues.forEach(function(i) {
+              var name = (i.cycle && i.cycle.name) ? i.cycle.name : '';
+              if (name && values.indexOf(name) === -1) values.push(name);
+            });
+            values.sort();
+            values.forEach(function(s) {
+              var label = document.createElement('label');
+              var cb = document.createElement('input');
+              cb.type = 'checkbox';
+              cb.value = s;
+              label.appendChild(cb);
+              label.appendChild(document.createTextNode(' ' + s));
+              listEl.appendChild(label);
+            });
+          } else if (col.id === 'team') {
+            allIssues.forEach(function(i) {
+              var s = (i.team_name || '').trim();
+              if (s && values.indexOf(s) === -1) values.push(s);
+            });
+            values.sort();
+            values.forEach(function(s) {
+              var label = document.createElement('label');
+              var cb = document.createElement('input');
+              cb.type = 'checkbox';
+              cb.value = s;
+              label.appendChild(cb);
+              label.appendChild(document.createTextNode(' ' + s));
+              listEl.appendChild(label);
+            });
+          } else if (col.id === 'labels') {
+            allIssues.forEach(function(i) {
+              (i.labels || []).forEach(function(lb) {
+                var name = (lb.name || '').trim();
+                if (name && values.indexOf(name) === -1) values.push(name);
+              });
+            });
+            values.sort();
+            values.forEach(function(s) {
+              var label = document.createElement('label');
+              var cb = document.createElement('input');
+              cb.type = 'checkbox';
+              cb.value = s;
+              label.appendChild(cb);
+              label.appendChild(document.createTextNode(' ' + s));
+              listEl.appendChild(label);
+            });
+          }
+        });
+      }
+
+      function buildThead() {
+        var row = document.getElementById('issues-thead-row');
+        if (!row) return;
+        row.innerHTML = '';
+        var visible = getVisibleColumns();
+        visible.forEach(function(col) {
+          var th = document.createElement('th');
+          if (col.sortable) {
+            th.className = 'th-sortable';
+            th.setAttribute('data-sort-column', col.id);
+            th.innerHTML = escapeHtml(col.label) + ' <span class="sort-indicator"></span>';
+          } else {
+            th.textContent = col.label;
+          }
+          row.appendChild(th);
+        });
+        updateSortIndicators();
+      }
+
+      function cellContent(issue, colId) {
+        var id = issue.identifier || issue.id;
+        if (colId === 'identifier') {
+          return '<a href="' + (issue.url || '#') + '" target="_blank" rel="noopener">' + escapeHtml(id) + '</a>';
+        }
+        if (colId === 'title') {
+          return escapeHtml(issue.title || '—');
+        }
+        if (colId === 'linear_status') {
+          return escapeHtml(issue.linear_status || '—');
+        }
+        if (colId === 'linear_priority') {
+          var p = issue.linear_priority != null ? issue.linear_priority : 0;
+          var cls = 'priority-' + p;
+          return '<span class="badge ' + cls + '">' + escapeHtml(linearPriorityLabel(issue.linear_priority)) + '</span>';
+        }
+        if (colId === 'personal_priority') {
+          return (issue.personal_priority != null && issue.personal_priority !== '') ? String(issue.personal_priority) : 'Not set';
+        }
+        if (colId === 'personal_status') {
+          var ps = issue.personal_status || '';
+          var psLabel = ps === '' ? 'No status' : ps;
+          var psBadgeClass = personalStatusBadgeClass(ps);
+          return psBadgeClass ? '<span class="badge personal-status-' + escapeHtml(psBadgeClass) + '">' + escapeHtml(psLabel) + '</span>' : escapeHtml(psLabel);
+        }
+        if (colId === 'notes_preview') {
+          var notesFirstLine = (issue.notes || '').split('\n')[0].trim();
+          var notesPreview = notesFirstLine ? notesFirstLine.substring(0, 60) + (notesFirstLine.length > 60 ? '…' : '') : '';
+          return '<span class="notes-preview" data-issue-id="' + escapeHtml(id) + '">' + escapeHtml(notesPreview || 'Add notes…') + '</span>';
+        }
+        if (colId === 'linear_updated') {
+          var rel = formatRelativeDate(issue.updated_at);
+          var tooltip = formatDateTime(issue.updated_at);
+          return tooltip ? '<span title="' + escapeHtml(tooltip) + '">' + (rel || '—') + '</span>' : (rel || '—');
+        }
+        if (colId === 'my_last_edit') {
+          var myEdit = issue.last_updated;
+          if (!myEdit) return '—';
+          var rel = formatRelativeDate(myEdit);
+          var tooltip = formatDateTime(myEdit);
+          return '<span title="' + escapeHtml(tooltip) + '">' + escapeHtml(rel) + '</span>';
+        }
+        if (colId === 'cycle') {
+          var cycle = issue.cycle;
+          var name = (cycle && cycle.name) ? cycle.name : '';
+          return escapeHtml(name || '—');
+        }
+        if (colId === 'team') {
+          return escapeHtml(issue.team_name || '—');
+        }
+        if (colId === 'labels') {
+          var labels = issue.labels || [];
+          if (labels.length === 0) return '—';
+          return labels.map(function(lb) {
+            var color = (lb.color && lb.color !== '') ? lb.color : '#8b949e';
+            return '<span class="label-badge" style="background:' + escapeHtml(color) + ';color:#fff">' + escapeHtml(lb.name || '') + '</span>';
+          }).join('');
+        }
+        return '—';
+      }
+
       function loadMeta() {
         fetch('/api/priority-labels').then(function(r) { return r.json(); }).then(function(labels) {
           priorityLabels = labels;
@@ -599,6 +876,14 @@
             return '<option value="' + escapeHtml(o) + '">' + escapeHtml(o || 'No status') + '</option>';
           }).join('');
         }).catch(function() {});
+        fetch('/api/config/columns').then(function(r) { return r.json(); }).then(function(data) {
+          columns = data.columns || [];
+          columnVisibility = data.column_visibility || {};
+          buildThead();
+          buildColumnPopover();
+          buildFilterPopover();
+          loadIssues(false);
+        }).catch(function() { loadIssues(false); });
       }
 
       function getFilter() {
@@ -612,6 +897,9 @@
         if ((cfg.linear_priorities || []).length > 0) n++;
         if ((cfg.personal_priority_filter || 'all') !== 'all') n++;
         if ((cfg.personal_statuses || []).length > 0) n++;
+        if ((cfg.cycles || []).length > 0) n++;
+        if ((cfg.teams || []).length > 0) n++;
+        if ((cfg.labels || []).length > 0) n++;
         return n;
       }
 
@@ -623,6 +911,9 @@
         (cfg.linear_priorities || []).forEach(function(p) { parts.push('linear_priority=' + encodeURIComponent(String(p))); });
         if ((cfg.personal_priority_filter || 'all') !== 'all') parts.push('personal_priority_filter=' + encodeURIComponent(cfg.personal_priority_filter));
         (cfg.personal_statuses || []).forEach(function(s) { parts.push('personal_status=' + encodeURIComponent(s)); });
+        (cfg.cycles || []).forEach(function(s) { parts.push('cycle=' + encodeURIComponent(s)); });
+        (cfg.teams || []).forEach(function(s) { parts.push('team=' + encodeURIComponent(s)); });
+        (cfg.labels || []).forEach(function(s) { parts.push('labels=' + encodeURIComponent(s)); });
         return parts.length ? '&' + parts.join('&') : '';
       }
 
@@ -633,36 +924,53 @@
       }
 
       function syncPopoverFromFilterConfig() {
-        filterDateFrom.value = filterConfig.date_from || '';
-        filterDateTo.value = filterConfig.date_to || '';
-        filterPersonalPriority.value = filterConfig.personal_priority_filter || 'all';
-        var statusSet = {};
-        (filterConfig.linear_statuses || []).forEach(function(s) { statusSet[s] = true; });
-        filterLinearStatus.querySelectorAll('input[type="checkbox"]').forEach(function(cb) {
-          cb.checked = statusSet[cb.value] || false;
-        });
-        var priSet = {};
-        (filterConfig.linear_priorities || []).forEach(function(p) { priSet[String(p)] = true; });
-        filterLinearPriority.querySelectorAll('input[type="checkbox"]').forEach(function(cb) {
-          cb.checked = priSet[cb.value] || false;
-        });
-        var psSet = {};
-        (filterConfig.personal_statuses || []).forEach(function(s) { psSet[s === null ? '' : s] = true; });
-        filterPersonalStatus.querySelectorAll('input[type="checkbox"]').forEach(function(cb) {
-          cb.checked = psSet[cb.value] || false;
+        var dateFrom = document.getElementById('filter-date-from');
+        var dateTo = document.getElementById('filter-date-to');
+        var personalPriority = document.getElementById('filter-personal-priority');
+        if (dateFrom) dateFrom.value = filterConfig.date_from || '';
+        if (dateTo) dateTo.value = filterConfig.date_to || '';
+        if (personalPriority) personalPriority.value = filterConfig.personal_priority_filter || 'all';
+        ['linear_status', 'linear_priority', 'personal_status', 'cycle', 'team', 'labels'].forEach(function(colId) {
+          var listEl = document.getElementById('filter-' + colId);
+          if (!listEl) return;
+          var set = {};
+          var arr = filterConfig[colId === 'linear_status' ? 'linear_statuses' : colId === 'linear_priority' ? 'linear_priorities' : colId === 'personal_status' ? 'personal_statuses' : colId + 's'] || [];
+          if (colId === 'personal_status') {
+            arr.forEach(function(s) { set[s === null || s === '' ? '__empty__' : s] = true; });
+          } else {
+            arr.forEach(function(s) { set[String(s)] = true; });
+          }
+          listEl.querySelectorAll('input[type="checkbox"]').forEach(function(cb) {
+            cb.checked = set[cb.value] || false;
+          });
         });
       }
 
       function syncFilterConfigFromPopover() {
-        filterConfig.date_from = (filterDateFrom.value || '').trim();
-        filterConfig.date_to = (filterDateTo.value || '').trim();
-        filterConfig.personal_priority_filter = filterPersonalPriority.value || 'all';
+        var dateFrom = document.getElementById('filter-date-from');
+        var dateTo = document.getElementById('filter-date-to');
+        var personalPriority = document.getElementById('filter-personal-priority');
+        if (dateFrom) filterConfig.date_from = (dateFrom.value || '').trim();
+        if (dateTo) filterConfig.date_to = (dateTo.value || '').trim();
+        if (personalPriority) filterConfig.personal_priority_filter = personalPriority.value || 'all';
         filterConfig.linear_statuses = [];
-        filterLinearStatus.querySelectorAll('input[type="checkbox"]:checked').forEach(function(cb) { filterConfig.linear_statuses.push(cb.value); });
+        var ls = document.getElementById('filter-linear_status');
+        if (ls) ls.querySelectorAll('input[type="checkbox"]:checked').forEach(function(cb) { filterConfig.linear_statuses.push(cb.value); });
         filterConfig.linear_priorities = [];
-        filterLinearPriority.querySelectorAll('input[type="checkbox"]:checked').forEach(function(cb) { filterConfig.linear_priorities.push(parseInt(cb.value, 10)); });
+        var lp = document.getElementById('filter-linear_priority');
+        if (lp) lp.querySelectorAll('input[type="checkbox"]:checked').forEach(function(cb) { filterConfig.linear_priorities.push(parseInt(cb.value, 10)); });
         filterConfig.personal_statuses = [];
-        filterPersonalStatus.querySelectorAll('input[type="checkbox"]:checked').forEach(function(cb) { filterConfig.personal_statuses.push(cb.value === '__empty__' ? '' : cb.value); });
+        var ps = document.getElementById('filter-personal_status');
+        if (ps) ps.querySelectorAll('input[type="checkbox"]:checked').forEach(function(cb) { filterConfig.personal_statuses.push(cb.value === '__empty__' ? '' : cb.value); });
+        filterConfig.cycles = [];
+        var cy = document.getElementById('filter-cycle');
+        if (cy) cy.querySelectorAll('input[type="checkbox"]:checked').forEach(function(cb) { filterConfig.cycles.push(cb.value); });
+        filterConfig.teams = [];
+        var tm = document.getElementById('filter-team');
+        if (tm) tm.querySelectorAll('input[type="checkbox"]:checked').forEach(function(cb) { filterConfig.teams.push(cb.value); });
+        filterConfig.labels = [];
+        var lb = document.getElementById('filter-labels');
+        if (lb) lb.querySelectorAll('input[type="checkbox"]:checked').forEach(function(cb) { filterConfig.labels.push(cb.value); });
       }
 
       function openFilterPopover() {
@@ -675,40 +983,18 @@
         filterPopover.classList.remove('open');
       }
 
-      function populateFilterControls() {
-        var linearStatuses = [];
-        allIssues.forEach(function(i) {
-          var s = (i.linear_status || '').trim();
-          if (s && linearStatuses.indexOf(s) === -1) linearStatuses.push(s);
-        });
-        linearStatuses.sort();
-        filterLinearStatus.innerHTML = linearStatuses.map(function(s) {
-          return '<label><input type="checkbox" value="' + escapeHtml(s) + '"> ' + escapeHtml(s) + '</label>';
-        }).join('');
-        var priorityOrder = [1, 2, 3, 4, 0];
-        filterLinearPriority.innerHTML = priorityOrder.map(function(p) {
-          var label = priorityLabels[p] != null ? priorityLabels[p] : 'Priority ' + p;
-          return '<label><input type="checkbox" value="' + p + '"> ' + escapeHtml(label) + '</label>';
-        }).join('');
-        filterPersonalStatus.innerHTML = (personalStatusOptions || []).map(function(o) {
-          var val = (o === '' || o === undefined) ? '__empty__' : o;
-          var display = (o === '' || o === undefined) ? 'No status' : o;
-          return '<label><input type="checkbox" value="' + escapeHtml(val) + '"> ' + escapeHtml(display) + '</label>';
-        }).join('');
-      }
-
       function loadIssues(isRefresh) {
         hideError();
         setLoading(true);
         const filter = getFilter();
         let apiUrl = '/api/issues?filter=' + encodeURIComponent(filter) + '&sort=' + encodeURIComponent(sortColumn);
-        if (sortColumn === 'last_updated') apiUrl += '&sort_dir=' + encodeURIComponent(sortDir);
+        if (sortColumn === 'last_updated' || sortColumn === 'my_last_edit' || sortColumn === 'linear_updated' || sortColumn === 'updated_at') apiUrl += '&sort_dir=' + encodeURIComponent(sortDir);
         apiUrl += buildFilterQueryString(filterConfig);
         function onData(data) {
           if (data.error) throw new Error(data.error);
           allIssues = data.issues || [];
           if (data.last_fetched) lastFetchedEl.textContent = 'Last fetched: ' + formatDate(data.last_fetched);
-          sortDir = (sortColumn === 'updated_at' || sortColumn === 'last_updated') ? 'desc' : 'asc';
+          sortDir = (sortColumn === 'updated_at' || sortColumn === 'last_updated' || sortColumn === 'linear_updated' || sortColumn === 'my_last_edit') ? 'desc' : 'asc';
           updateFilterBadge();
           updateSortIndicators();
           renderTable();
@@ -801,7 +1087,7 @@
         loadIssues(false);
       });
       filterClearBtn.addEventListener('click', function() {
-        filterConfig = { date_from: '', date_to: '', linear_statuses: [], linear_priorities: [], personal_priority_filter: 'all', personal_statuses: [] };
+        filterConfig = { date_from: '', date_to: '', linear_statuses: [], linear_priorities: [], personal_priority_filter: 'all', personal_statuses: [], cycles: [], teams: [], labels: [] };
         syncPopoverFromFilterConfig();
         updateFilterBadge();
         closeFilterPopover();
@@ -809,6 +1095,27 @@
       });
       document.addEventListener('click', function(e) {
         if (filterPopover.classList.contains('open') && !filterPopover.contains(e.target) && !filterBtn.contains(e.target)) closeFilterPopover();
+        if (columnPopover.classList.contains('open') && !columnPopover.contains(e.target) && !gearBtn.contains(e.target)) columnPopover.classList.remove('open');
+      });
+      gearBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        columnPopover.classList.toggle('open');
+        columnMessage.style.display = 'none';
+      });
+      document.getElementById('column-reset').addEventListener('click', function() {
+        columns.forEach(function(c) { columnVisibility[c.id] = c.default_visible; });
+        fetch('/api/config/columns', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ column_visibility: columnVisibility })
+        }).then(function(r) { return r.json(); }).then(function(data) {
+          if (data.column_visibility) columnVisibility = data.column_visibility;
+          buildColumnPopover();
+          buildThead();
+          buildFilterPopover();
+          updateFilterBadge();
+          renderTable();
+        }).catch(function() {});
       });
       refreshBtn.addEventListener('click', function() { loadIssues(true); });
       tabActiveEl.addEventListener('click', function() {
@@ -832,15 +1139,15 @@
         loadIssues(false);
       });
       searchEl.addEventListener('input', renderTable);
-      document.querySelectorAll('.th-sortable').forEach(function(th) {
-        th.addEventListener('click', function() {
-          var col = th.getAttribute('data-sort-column');
-          if (!col) return;
-          if (sortColumn === col) sortDir = sortDir === 'asc' ? 'desc' : 'asc';
-          else { sortColumn = col; sortDir = 'asc'; if (col === 'updated_at' || col === 'last_updated') sortDir = 'desc'; }
-          updateSortIndicators();
-          renderTable();
-        });
+      tableEl.addEventListener('click', function(e) {
+        var th = e.target.closest('.th-sortable');
+        if (!th) return;
+        var col = th.getAttribute('data-sort-column');
+        if (!col) return;
+        if (sortColumn === col) sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+        else { sortColumn = col; sortDir = 'asc'; if (col === 'updated_at' || col === 'last_updated' || col === 'linear_updated' || col === 'my_last_edit') sortDir = 'desc'; }
+        updateSortIndicators();
+        renderTable();
       });
       modalCancel.addEventListener('click', closeModal);
       modalSave.addEventListener('click', saveOverlay);
@@ -867,7 +1174,6 @@
       });
 
       loadMeta();
-      loadIssues(false);
     })();
   </script>
 </body>

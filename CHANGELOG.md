@@ -43,3 +43,14 @@
 # Changelog
 
 ## [Unreleased]
+
+## v0.2.0
+
+- feat: customizable column system
+- Column registry (single source of truth) with default and optional columns
+- Gear icon: column visibility panel; show/hide optional columns (Cycle, Team, Labels)
+- Column visibility persisted in overlay.json; GET/POST /api/config/columns
+- Dynamic filter popover: only shows filters for currently visible columns
+- All visible columns sortable (identifier, title, cycle, team, labels, notes, etc.)
+- Optional columns: Cycle, Team, Labels (from Linear); labels as colored badges
+- Identifier and Title always visible; at least one other column required
