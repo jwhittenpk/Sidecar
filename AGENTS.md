@@ -27,6 +27,16 @@ This file is for AI coding agents (e.g. Cursor) working on this codebase.
 4. **Tests required.** Every new feature or fix must include or update unit tests. A task is not done until `pytest tests/` passes.
 5. **Single frontend file.** Keep the UI in one `templates/index.html` with embedded `<style>` and `<script>`. Do not split into separate CSS/JS files or introduce a frontend framework.
 
+## Personal status badge colors
+
+Badge colors in `templates/index.html` follow these rules so the palette stays consistent:
+
+- **Warm colors** (red, amber, orange) = urgent or blocking states (e.g. Blocked, Waiting on Me, Waiting on Someone, Waiting on Testing).
+- **Cool colors** (blue, teal, purple, green) = neutral or flow states (e.g. In Progress, Not Started, Testing, Pair Testing, Waiting on Review, Ready to Close).
+- **Light neutral colors** (light gray) = undefined or unset (No Status).
+
+When adding or changing a personal status badge, pick a color that matches its meaning under this scheme.
+
 ## Branch naming
 
 - Use `feature/Sidecar-###` where `###` is the GitHub issue number or the next PR number (e.g. `feature/Sidecar-12`).

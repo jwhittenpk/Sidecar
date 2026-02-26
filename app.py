@@ -42,10 +42,13 @@ PERSONAL_STATUS_OPTIONS = [
     "",
     "Not started",
     "In Progress",
-    "Blocked",
+    "Testing",
+    "Pair Testing",
+    "Waiting on Testing",
     "Waiting On Someone",
     "Waiting On Me",
     "Waiting On Review",
+    "Blocked",
     "Ready to Close",
 ]
 
@@ -617,7 +620,11 @@ def _apply_sort(issues, sort_val, sort_dir=None):
     if sort_val == "updated_at":
         return sorted(issues, key=lambda i: (i.get("updated_at") or ""), reverse=True)
     if sort_val == "personal_status":
-        return sorted(issues, key=lambda i: (i.get("personal_status") or ""))
+        status_order = {s: i for i, s in enumerate(PERSONAL_STATUS_OPTIONS)}
+        def personal_status_key(i):
+            s = i.get("personal_status") or ""
+            return status_order.get(s, len(PERSONAL_STATUS_OPTIONS))
+        return sorted(issues, key=personal_status_key)
     if sort_val == "last_updated":
         # Ascending: oldest first, no-edit last. Descending: newest first, no-edit first.
         def last_updated_key_asc(i):
@@ -724,6 +731,10 @@ def api_overlay_save(issue_id):
     data = request.get_json(force=True, silent=True) or {}
     allowed = {"personal_priority", "personal_status", "notes"}
     payload = {k: data[k] for k in allowed if k in data}
+    if "personal_status" in payload:
+        val = payload.get("personal_status", "")
+        if val not in PERSONAL_STATUS_OPTIONS:
+            return jsonify({"error": "Invalid personal_status"}), 400
     key = _overlay_key(issue_id)
     try:
         overlay = read_overlay()
