@@ -218,3 +218,123 @@ def test_change_existing_priority_rebalances():
     assert result["LIN-3"]["personal_priority"] == 1
     assert result["LIN-1"]["personal_priority"] == 2
     assert result["LIN-2"]["personal_priority"] == 3
+
+
+# --- column_preferences in overlay.json ---
+
+
+def test_column_preferences_written_and_read(temp_overlay_path):
+    """Column order and visibility are written and read correctly from overlay.json."""
+    order = [c["id"] for c in app_module.COLUMN_REGISTRY]
+    # Swap first two for a non-default order
+    order = [order[1], order[0]] + order[2:]
+    vis = {c["id"]: c["default_visible"] for c in app_module.COLUMN_REGISTRY}
+    vis["cycle"] = False
+    vis["team"] = True
+    app_module.write_column_preferences(order, vis)
+    assert temp_overlay_path.exists()
+    with open(temp_overlay_path, encoding="utf-8") as f:
+        data = json.load(f)
+    assert app_module.COLUMN_PREFERENCES_KEY in data
+    prefs = data[app_module.COLUMN_PREFERENCES_KEY]
+    assert prefs["order"] == order
+    assert prefs["visibility"]["cycle"] is False
+    assert prefs["visibility"]["team"] is True
+    read_prefs = app_module.get_column_preferences()
+    assert read_prefs["order"] == order
+    assert read_prefs["visibility"]["cycle"] is False
+    assert read_prefs["visibility"]["team"] is True
+
+
+def test_column_order_move_up_down_persisted(temp_overlay_path):
+    """Moving a column up/down (different order) is written and read correctly."""
+    default_order = list(app_module.DEFAULT_COLUMN_ORDER)
+    # Move "title" to index 0 (swap with identifier)
+    order = [default_order[1], default_order[0]] + default_order[2:]
+    vis = {c["id"]: c["default_visible"] for c in app_module.COLUMN_REGISTRY}
+    app_module.write_column_preferences(order, vis)
+    read_prefs = app_module.get_column_preferences()
+    assert read_prefs["order"][0] == "title"
+    assert read_prefs["order"][1] == "identifier"
+
+
+def test_column_order_first_up_no_op(temp_overlay_path):
+    """Order with first column first is accepted and unchanged (no-op move up for first)."""
+    order = list(app_module.DEFAULT_COLUMN_ORDER)
+    vis = {c["id"]: c["default_visible"] for c in app_module.COLUMN_REGISTRY}
+    app_module.write_column_preferences(order, vis)
+    read_prefs = app_module.get_column_preferences()
+    assert read_prefs["order"] == order
+    assert read_prefs["order"][0] == "identifier"
+
+
+def test_column_order_last_down_no_op(temp_overlay_path):
+    """Order with last column last is accepted and unchanged (no-op move down for last)."""
+    order = list(app_module.DEFAULT_COLUMN_ORDER)
+    vis = {c["id"]: c["default_visible"] for c in app_module.COLUMN_REGISTRY}
+    app_module.write_column_preferences(order, vis)
+    read_prefs = app_module.get_column_preferences()
+    assert read_prefs["order"][-1] == "labels"
+
+
+def test_hidden_columns_retain_position_in_order(temp_overlay_path):
+    """Hidden columns remain in the order array; re-enabling restores position."""
+    order = list(app_module.DEFAULT_COLUMN_ORDER)
+    vis = {c["id"]: c["default_visible"] for c in app_module.COLUMN_REGISTRY}
+    vis["cycle"] = False
+    app_module.write_column_preferences(order, vis)
+    read_prefs = app_module.get_column_preferences()
+    assert "cycle" in read_prefs["order"]
+    cycle_idx = read_prefs["order"].index("cycle")
+    vis["cycle"] = True
+    app_module.write_column_preferences(read_prefs["order"], vis)
+    read_prefs2 = app_module.get_column_preferences()
+    assert read_prefs2["order"].index("cycle") == cycle_idx
+
+
+def test_column_preferences_migration_from_legacy(temp_overlay_path):
+    """Old column_visibility key is migrated to column_preferences on load."""
+    app_module.write_overlay({
+        app_module.COLUMN_VISIBILITY_KEY: {"cycle": True, "team": False},
+        "LIN-1": {"notes": "x"},
+    })
+    prefs = app_module.get_column_preferences()
+    assert "order" in prefs
+    assert prefs["order"] == app_module.DEFAULT_COLUMN_ORDER
+    assert prefs["visibility"]["cycle"] is True
+    assert prefs["visibility"]["team"] is False
+    with open(temp_overlay_path, encoding="utf-8") as f:
+        data = json.load(f)
+    assert app_module.COLUMN_PREFERENCES_KEY in data
+    assert app_module.COLUMN_VISIBILITY_KEY not in data
+
+
+def test_column_preferences_missing_returns_defaults(temp_overlay_path):
+    """Missing column_preferences (and no legacy key) returns default order and visibility."""
+    app_module.write_overlay({"LIN-1": {"notes": "x"}})
+    prefs = app_module.get_column_preferences()
+    assert prefs["order"] == app_module.DEFAULT_COLUMN_ORDER
+    assert prefs["visibility"]["identifier"] is True
+    assert prefs["visibility"]["title"] is True
+    assert prefs["visibility"]["cycle"] is False
+
+
+def test_column_preferences_does_not_affect_issue_overlay(temp_overlay_path):
+    """Issue-level overlay data is unaffected by column preferences reads/writes."""
+    order = list(app_module.DEFAULT_COLUMN_ORDER)
+    vis = {c["id"]: c["default_visible"] for c in app_module.COLUMN_REGISTRY}
+    app_module.write_overlay({
+        app_module.COLUMN_PREFERENCES_KEY: {"order": order, "visibility": vis},
+        "LIN-1": {"personal_priority": 1, "notes": "Note 1", "last_updated": "2025-02-01T12:00:00"},
+    })
+    overlay = app_module.read_overlay()
+    assert "LIN-1" in overlay
+    assert overlay["LIN-1"]["notes"] == "Note 1"
+    assert overlay["LIN-1"]["personal_priority"] == 1
+    merged = app_module.merge_issues(
+        [{"id": "u1", "identifier": "LIN-1", "title": "T"}],
+        overlay,
+    )
+    assert len(merged) == 1
+    assert merged[0]["notes"] == "Note 1"
+    assert merged[0]["personal_priority"] == 1

@@ -34,23 +34,11 @@ jobs:
         if: steps.skip.outputs.skip != 'true'
         id: setver
         run: |
-          TAGS=$(git tag -l)
-          if [ -n "$TAGS" ]; then
-            LATEST=$(git describe --tags --abbrev=0)
-            V="${LATEST#v}"
-            IFS=. read -r MAJOR MINOR PATCH <<< "$V"
-            [ -z "$PATCH" ] && PATCH=0
-            if git log -1 --pretty=%B | grep -qiE '^feat[(:]'; then
-              MINOR=$((MINOR + 1))
-              PATCH=0
-            else
-              PATCH=$((PATCH + 1))
-            fi
-            NEW="v${MAJOR}.${MINOR}.${PATCH}"
-          else
-            NEW="v0.1.0"
-          fi
+          V=$(grep -E '^[0-9]+\.[0-9]+\.[0-9]+' VERSION | head -1 | tr -d ' \r\n')
+          [ -z "$V" ] && { echo "VERSION file missing or invalid"; exit 1; }
+          NEW="v$V"
           echo "new_version=$NEW" >> $GITHUB_OUTPUT
+          echo "version_file=$V" >> $GITHUB_OUTPUT
 
       - name: Create tag and release
         if: steps.skip.outputs.skip != 'true'
@@ -67,7 +55,19 @@ jobs:
           else
             NOTES=$(git log --pretty=format:"- %s" "$PREV..$NEW")
           fi
-          gh release create "$NEW" --notes "$NOTES"
+          gh release create "$NEW" --title "$NEW" --notes "$NOTES"
+
+      - name: Bump VERSION to next patch
+        if: steps.skip.outputs.skip != 'true'
+        id: bump
+        run: |
+          V="${{ steps.setver.outputs.version_file }}"
+          IFS=. read -r MAJOR MINOR PATCH <<< "$V"
+          [ -z "$PATCH" ] && PATCH=0
+          PATCH=$((PATCH + 1))
+          NEXT="${MAJOR}.${MINOR}.${PATCH}"
+          echo "$NEXT" > VERSION
+          echo "next_version=$NEXT" >> $GITHUB_OUTPUT
 
       - name: Update CHANGELOG
         if: steps.skip.outputs.skip != 'true'
@@ -89,11 +89,11 @@ jobs:
             echo "$COMMITS" >> CHANGELOG.md
           fi
 
-      - name: Commit CHANGELOG
+      - name: Commit CHANGELOG and VERSION
         if: steps.skip.outputs.skip != 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add CHANGELOG.md
-          git diff --staged --quiet || git commit -m "chore: update CHANGELOG for ${{ steps.setver.outputs.new_version }}"
+          git add CHANGELOG.md VERSION
+          git diff --staged --quiet || git commit -m "chore: update CHANGELOG and VERSION for ${{ steps.setver.outputs.new_version }}"
           git push origin main

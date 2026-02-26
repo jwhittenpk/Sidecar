@@ -57,6 +57,28 @@ CYCLE_STATUS_ORDER = ["In Review", "In Progress", "Todo"]
 # Linear priority sort within status: High(2) → Medium(3) → Low(4) → No priority(0)
 LINEAR_PRIORITY_SORT_ORDER = {2: 0, 3: 1, 4: 2, 0: 3}
 
+# Reserved top-level keys in overlay.json (not issue entries)
+COLUMN_VISIBILITY_KEY = "column_visibility"  # legacy; migrated to column_preferences
+COLUMN_PREFERENCES_KEY = "column_preferences"
+
+# Single source of truth for all columns. Sort/filter types and linear_field per spec.
+COLUMN_REGISTRY = [
+    {"id": "identifier", "label": "Issue", "default_visible": True, "sortable": True, "sort_type": "alpha", "filterable": False, "filter_type": None, "linear_field": "identifier"},
+    {"id": "title", "label": "Title", "default_visible": True, "sortable": True, "sort_type": "alpha", "filterable": False, "filter_type": None, "linear_field": "title"},
+    {"id": "linear_status", "label": "Linear Status", "default_visible": True, "sortable": True, "sort_type": "alpha", "filterable": True, "filter_type": "multiselect", "linear_field": "state.name"},
+    {"id": "linear_priority", "label": "Linear Priority", "default_visible": True, "sortable": True, "sort_type": "priority", "filterable": True, "filter_type": "multiselect", "linear_field": "priority"},
+    {"id": "personal_priority", "label": "Personal Priority", "default_visible": True, "sortable": True, "sort_type": "numeric", "filterable": True, "filter_type": "toggle", "linear_field": None},
+    {"id": "personal_status", "label": "Personal Status", "default_visible": True, "sortable": True, "sort_type": "alpha", "filterable": True, "filter_type": "multiselect", "linear_field": None},
+    {"id": "notes_preview", "label": "Notes", "default_visible": True, "sortable": True, "sort_type": "alpha", "filterable": False, "filter_type": None, "linear_field": None},
+    {"id": "linear_updated", "label": "Linear Updated", "default_visible": True, "sortable": True, "sort_type": "date", "filterable": True, "filter_type": "daterange", "linear_field": "updatedAt"},
+    {"id": "my_last_edit", "label": "My Last Edit", "default_visible": True, "sortable": True, "sort_type": "date", "filterable": False, "filter_type": None, "linear_field": None},
+    {"id": "cycle", "label": "Cycle", "default_visible": False, "sortable": True, "sort_type": "alpha", "filterable": True, "filter_type": "multiselect", "linear_field": "cycle.name"},
+    {"id": "team", "label": "Team", "default_visible": False, "sortable": True, "sort_type": "alpha", "filterable": True, "filter_type": "multiselect", "linear_field": "team.name"},
+    {"id": "labels", "label": "Labels", "default_visible": False, "sortable": True, "sort_type": "alpha", "filterable": True, "filter_type": "multiselect", "linear_field": "labels"},
+]
+DEFAULT_COLUMN_ORDER = [c["id"] for c in COLUMN_REGISTRY]
+_REGISTRY_IDS = frozenset(c["id"] for c in COLUMN_REGISTRY)
+
 
 def get_linear_token():
     """Return Linear API token; raise if not set.
@@ -123,6 +145,7 @@ def _fetch_issues_page(token, after_cursor=None):
           state { name, type }
           team { name }
           cycle { id name number startsAt endsAt }
+          labels { nodes { id name color } }
         }
         pageInfo { hasNextPage, endCursor }
       }
@@ -180,6 +203,8 @@ def _normalize_issue(node):
     state = node.get("state") or {}
     team = node.get("team") or {}
     cycle = _parse_cycle(node.get("cycle"))
+    labels_nodes = (node.get("labels") or {}).get("nodes") or []
+    labels = [{"name": n.get("name", ""), "color": n.get("color")} for n in labels_nodes if isinstance(n, dict)]
     return {
         "id": node["id"],
         "identifier": node.get("identifier", ""),
@@ -191,6 +216,7 @@ def _normalize_issue(node):
         "updated_at": node.get("updatedAt", ""),
         "is_completed": state.get("type") in ("completed", "canceled"),
         "cycle": cycle,
+        "labels": labels,
     }
 
 
@@ -225,6 +251,71 @@ def write_overlay(overlay):
     """Write the entire overlay dict to overlay.json in one write."""
     with open(OVERLAY_PATH, "w", encoding="utf-8") as f:
         json.dump(overlay, f, indent=2)
+
+
+def get_column_visibility():
+    """Return column visibility dict from overlay; if missing, return defaults from COLUMN_REGISTRY."""
+    overlay = read_overlay()
+    vis = overlay.get(COLUMN_VISIBILITY_KEY)
+    if isinstance(vis, dict):
+        # Merge with defaults so new columns get default_visible
+        default_vis = {c["id"]: c["default_visible"] for c in COLUMN_REGISTRY}
+        return {**default_vis, **vis}
+    return {c["id"]: c["default_visible"] for c in COLUMN_REGISTRY}
+
+
+def write_column_visibility(visibility_dict):
+    """Write column_visibility to overlay.json; preserves all other overlay keys. Legacy; prefer write_column_preferences."""
+    overlay = read_overlay()
+    overlay[COLUMN_VISIBILITY_KEY] = dict(visibility_dict)
+    write_overlay(overlay)
+
+
+def _valid_column_order(order):
+    """Return True if order is a list containing every registry ID exactly once."""
+    if not isinstance(order, list) or len(order) != len(_REGISTRY_IDS):
+        return False
+    return set(order) == _REGISTRY_IDS
+
+
+def get_column_preferences():
+    """Return { order: [...], visibility: {...} } from overlay. Migrates from column_visibility if needed."""
+    overlay = read_overlay()
+    prefs = overlay.get(COLUMN_PREFERENCES_KEY)
+    if isinstance(prefs, dict):
+        order = prefs.get("order")
+        vis = prefs.get("visibility")
+        if isinstance(order, list) and isinstance(vis, dict):
+            if _valid_column_order(order):
+                default_vis = {c["id"]: c["default_visible"] for c in COLUMN_REGISTRY}
+                merged_vis = {**default_vis, **{k: bool(v) for k, v in vis.items() if k in default_vis}}
+                return {"order": list(order), "visibility": merged_vis}
+    # Legacy migration
+    leg = overlay.get(COLUMN_VISIBILITY_KEY)
+    if isinstance(leg, dict):
+        default_vis = {c["id"]: c["default_visible"] for c in COLUMN_REGISTRY}
+        merged_vis = {**default_vis, **{k: bool(v) for k, v in leg.items() if k in default_vis}}
+        new_prefs = {"order": list(DEFAULT_COLUMN_ORDER), "visibility": merged_vis}
+        overlay = read_overlay()
+        overlay[COLUMN_PREFERENCES_KEY] = new_prefs
+        if COLUMN_VISIBILITY_KEY in overlay:
+            del overlay[COLUMN_VISIBILITY_KEY]
+        write_overlay(overlay)
+        return {"order": new_prefs["order"], "visibility": new_prefs["visibility"]}
+    # Missing: return defaults
+    return {
+        "order": list(DEFAULT_COLUMN_ORDER),
+        "visibility": {c["id"]: c["default_visible"] for c in COLUMN_REGISTRY},
+    }
+
+
+def write_column_preferences(order_list, visibility_dict):
+    """Write column_preferences to overlay.json; preserves all other overlay keys. Removes legacy column_visibility."""
+    overlay = read_overlay()
+    overlay[COLUMN_PREFERENCES_KEY] = {"order": list(order_list), "visibility": dict(visibility_dict)}
+    if COLUMN_VISIBILITY_KEY in overlay:
+        del overlay[COLUMN_VISIBILITY_KEY]
+    write_overlay(overlay)
 
 
 def write_overlay_entry(issue_id, data):
@@ -271,12 +362,15 @@ def rebalance_overlay_after_assign(overlay, issue_id, new_priority):
         out[key] = {}
     entry = out[key]
     old_priority = entry.get("personal_priority")
+    _reserved = (COLUMN_VISIBILITY_KEY, COLUMN_PREFERENCES_KEY)
     someone_else_has_n = any(
-        k != key and (out[k].get("personal_priority")) == n
+        k != key and k not in _reserved and (out[k].get("personal_priority")) == n
         for k in out
     )
     if someone_else_has_n:
         for k in out:
+            if k in _reserved:
+                continue
             p = out[k].get("personal_priority")
             if p is not None and p >= n:
                 out[k] = {**out[k], "personal_priority": p + 1}
@@ -285,7 +379,7 @@ def rebalance_overlay_after_assign(overlay, issue_id, new_priority):
         out[key] = {**entry, "personal_priority": n}
         if old_priority is not None and old_priority != n:
             for k in out:
-                if k == key:
+                if k == key or k in _reserved:
                     continue
                 p = out[k].get("personal_priority")
                 if p is not None and p > old_priority:
@@ -303,9 +397,12 @@ def rebalance_overlay_after_remove(overlay, issue_id):
     removed = entry.get("personal_priority")
     if removed is None:
         return copy.deepcopy(overlay)
+    _reserved = (COLUMN_VISIBILITY_KEY, COLUMN_PREFERENCES_KEY)
     out = copy.deepcopy(overlay)
     out[key] = {k: v for k, v in entry.items() if k != "personal_priority"}
     for k in out:
+        if k in _reserved:
+            continue
         p = out[k].get("personal_priority")
         if p is not None and p > removed:
             out[k] = {**out[k], "personal_priority": p - 1}
@@ -329,6 +426,8 @@ def rebalance_overlay_after_remove_multiple(overlay, issue_ids):
             continue
         out[k] = {kk: vv for kk, vv in out[k].items() if kk != "personal_priority"}
         for kk in out:
+            if kk in (COLUMN_VISIBILITY_KEY, COLUMN_PREFERENCES_KEY):
+                continue
             p = out[kk].get("personal_priority")
             if p is not None and p > removed:
                 out[kk] = {**out[kk], "personal_priority": p - 1}
@@ -337,10 +436,11 @@ def rebalance_overlay_after_remove_multiple(overlay, issue_ids):
 
 def resolve_priority_conflicts(overlay):
     """Pure: if duplicate personal_priority values exist, reassign contiguous 1,2,3 by last_updated desc.
-    Returns a new overlay dict; does not mutate input. No I/O."""
+    Returns a new overlay dict; does not mutate input. No I/O. Skips reserved keys."""
+    _reserved = (COLUMN_VISIBILITY_KEY, COLUMN_PREFERENCES_KEY)
     entries_with_priority = [
         (k, v) for k, v in overlay.items()
-        if v.get("personal_priority") is not None
+        if k not in _reserved and isinstance(v, dict) and v.get("personal_priority") is not None
     ]
     if not entries_with_priority:
         return copy.deepcopy(overlay)
@@ -543,6 +643,18 @@ def apply_issue_filters(issues, filter_config):
     if personal_statuses:
         status_set = set(s if s is not None else "" for s in personal_statuses)
         result = [i for i in result if (i.get("personal_status") or "") in status_set]
+    cycles = cfg.get("cycles") or []
+    if cycles:
+        cycle_set = set(cycles)
+        result = [i for i in result if (i.get("cycle") or {}).get("name", "") in cycle_set]
+    teams = cfg.get("teams") or []
+    if teams:
+        team_set = set(teams)
+        result = [i for i in result if (i.get("team_name") or "") in team_set]
+    label_names = cfg.get("labels") or []
+    if label_names:
+        label_set = set(label_names)
+        result = [i for i in result if any((lb.get("name") or "") in label_set for lb in (i.get("labels") or []))]
     return result
 
 
@@ -593,17 +705,45 @@ def _parse_filter_config_from_request():
             personal_status = [s if s == "" else (s.strip() if isinstance(s, str) else s) for s in personal_status]
         if personal_status is not None and len(personal_status) > 0:
             cfg["personal_statuses"] = personal_status
+    cycle = request.args.getlist("cycle") or request.args.get("cycle")
+    if cycle is not None:
+        if isinstance(cycle, str):
+            cycle = [s.strip() for s in cycle.split(",") if s.strip()]
+        else:
+            cycle = [s.strip() if isinstance(s, str) else str(s) for s in cycle]
+        if cycle:
+            cfg["cycles"] = cycle
+    team = request.args.getlist("team") or request.args.get("team")
+    if team is not None:
+        if isinstance(team, str):
+            team = [s.strip() for s in team.split(",") if s.strip()]
+        else:
+            team = [s.strip() if isinstance(s, str) else str(s) for s in team]
+        if team:
+            cfg["teams"] = team
+    labels = request.args.getlist("labels") or request.args.get("labels")
+    if labels is not None:
+        if isinstance(labels, str):
+            labels = [s.strip() for s in labels.split(",") if s.strip()]
+        else:
+            labels = [s.strip() if isinstance(s, str) else str(s) for s in labels]
+        if labels:
+            cfg["labels"] = labels
     return cfg
 
 
 def _apply_sort(issues, sort_val, sort_dir=None):
-    """Sort issues by sort_val: 'cycle' | 'personal_priority' | 'linear_priority' | 'linear_status' |
-    'updated_at' | 'personal_status' | 'last_updated'. sort_dir: 'asc' | 'desc' (for last_updated)."""
+    """Sort issues by sort_val (column id). sort_dir: 'asc' | 'desc'."""
     if not sort_val:
         return list(issues)
     dir_asc = (sort_dir or "asc").strip().lower() != "desc"
+    # Column: cycle — alpha by cycle name; no cycle at bottom
     if sort_val == "cycle":
-        return sort_issues_by_cycle(issues)
+        def cycle_name_key(i):
+            c = i.get("cycle")
+            name = (c.get("name") or "") if c else ""
+            return (0 if name else 1, name)
+        return sorted(issues, key=cycle_name_key, reverse=not dir_asc)
     if sort_val == "personal_priority":
         ranked = [i for i in issues if i.get("personal_priority") is not None]
         unranked = [i for i in issues if i.get("personal_priority") is None]
@@ -625,7 +765,7 @@ def _apply_sort(issues, sort_val, sort_dir=None):
             s = i.get("personal_status") or ""
             return status_order.get(s, len(PERSONAL_STATUS_OPTIONS))
         return sorted(issues, key=personal_status_key)
-    if sort_val == "last_updated":
+    if sort_val == "last_updated" or sort_val == "my_last_edit":
         # Ascending: oldest first, no-edit last. Descending: newest first, no-edit first.
         def last_updated_key_asc(i):
             lu = i.get("last_updated") or ""
@@ -635,6 +775,22 @@ def _apply_sort(issues, sort_val, sort_dir=None):
             return (1 if lu else 0, lu)
         key_fn = last_updated_key_desc if not dir_asc else last_updated_key_asc
         return sorted(issues, key=key_fn, reverse=not dir_asc)
+    if sort_val == "identifier":
+        return sorted(issues, key=lambda i: (i.get("identifier") or ""), reverse=not dir_asc)
+    if sort_val == "title":
+        return sorted(issues, key=lambda i: (i.get("title") or ""), reverse=not dir_asc)
+    if sort_val == "team":
+        return sorted(issues, key=lambda i: (i.get("team_name") or ""), reverse=not dir_asc)
+    if sort_val == "labels":
+        def first_label_key(i):
+            labels = i.get("labels") or []
+            name = (labels[0].get("name") or "") if labels else ""
+            return (0 if name else 1, name)
+        return sorted(issues, key=first_label_key, reverse=not dir_asc)
+    if sort_val == "notes_preview":
+        return sorted(issues, key=lambda i: (i.get("notes") or ""), reverse=not dir_asc)
+    if sort_val == "linear_updated":
+        return sorted(issues, key=lambda i: (i.get("updated_at") or ""), reverse=not dir_asc)
     return list(issues)
 
 
@@ -674,9 +830,20 @@ def refresh_cache():
     return _issues_cache
 
 
+def _get_version():
+    """Return version string from VERSION file, or empty string if missing."""
+    version_path = Path(__file__).parent / "VERSION"
+    if version_path.exists():
+        try:
+            return version_path.read_text(encoding="utf-8").strip()
+        except OSError:
+            pass
+    return ""
+
+
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", version=_get_version())
 
 
 @app.route("/api/issues", methods=["GET"])
@@ -763,6 +930,53 @@ def api_overlay_save(issue_id):
             return jsonify({"ok": True, "entry": entry})
     except (OSError, TypeError) as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/config/columns", methods=["GET"])
+def api_config_columns_get():
+    """Return column registry and current column order and visibility (single source of truth for frontend)."""
+    prefs = get_column_preferences()
+    return jsonify({
+        "columns": COLUMN_REGISTRY,
+        "order": prefs["order"],
+        "visibility": prefs["visibility"],
+    })
+
+
+@app.route("/api/config/columns", methods=["POST"])
+def api_config_columns_post():
+    """Update column order and visibility; persist to overlay.json. Reject invalid order or hiding identifier/title."""
+    data = request.get_json(force=True, silent=True) or {}
+    order = data.get("order")
+    visibility = data.get("visibility")
+    if not isinstance(order, list):
+        return jsonify({"error": "order must be an array of column IDs"}), 400
+    if not isinstance(visibility, dict):
+        return jsonify({"error": "visibility must be a dict"}), 400
+    if not _valid_column_order(order):
+        if len(set(order)) != len(order):
+            return jsonify({"error": "order must contain each column ID exactly once (no duplicates)"}), 400
+        missing = _REGISTRY_IDS - set(order)
+        extra = set(order) - _REGISTRY_IDS
+        if missing or extra:
+            return jsonify({"error": "order must contain every column ID exactly once"}), 400
+        return jsonify({"error": "order must contain every column ID exactly once"}), 400
+    current = get_column_preferences()
+    merged_vis = {**current["visibility"], **{k: bool(v) for k, v in visibility.items() if k in _REGISTRY_IDS}}
+    if not merged_vis.get("identifier", True):
+        return jsonify({"error": "identifier column cannot be hidden"}), 400
+    if not merged_vis.get("title", True):
+        return jsonify({"error": "title column cannot be hidden"}), 400
+    visible_count = sum(1 for c in COLUMN_REGISTRY if merged_vis.get(c["id"], True))
+    if visible_count <= 2:
+        return jsonify({"error": "At least one column besides Issue and Title must remain visible"}), 400
+    write_column_preferences(order, merged_vis)
+    prefs = get_column_preferences()
+    return jsonify({
+        "columns": COLUMN_REGISTRY,
+        "order": prefs["order"],
+        "visibility": prefs["visibility"],
+    })
 
 
 @app.route("/api/priority-labels", methods=["GET"])
