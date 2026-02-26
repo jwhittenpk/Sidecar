@@ -1,3 +1,9 @@
+## v0.1.4
+
+- Merge pull request #7 from jwhittenpk/feature/Sidecar-6
+- Sidecar-6: fix: Search box behaves as expected
+- chore: update CHANGELOG for v0.1.3
+
 ## v0.1.3
 
 - Merge pull request #6 from jwhittenpk/feature/Sidecar-5
