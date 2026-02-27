@@ -112,6 +112,8 @@
     .badge.personal-status-waiting-on-review { background: var(--priority-low); color: #000; }
     .badge.personal-status-blocked { background: var(--priority-urgent); color: #fff; }
     .badge.personal-status-ready-to-close { background: var(--priority-low); color: #000; }
+    .badge.personal-status-completed { background: #3fb950; color: #000; }
+    .badge.personal-status-notable { background: #5b7c9a; color: #fff; }
     /* Linear Status badge colors (default gray for unmapped statuses) */
     .badge.linear-status-in-progress { background: var(--status-amber); color: #000; }
     .badge.linear-status-in-review { background: var(--priority-low); color: #000; }
@@ -1110,6 +1112,7 @@
 
       function saveOverlay() {
         if (!editingIssueId) return;
+        var issue = allIssues.find(function(i) { return (i.identifier || i.id) === editingIssueId; });
         var priVal = modalPersonalPriority.value;
         var payload = {
           notes: modalNotes.value,
@@ -1117,6 +1120,7 @@
           personal_priority: priVal === '' ? null : parseInt(priVal, 10)
         };
         if (payload.personal_priority !== null && isNaN(payload.personal_priority)) payload.personal_priority = null;
+        if (issue && typeof issue.is_completed === 'boolean') payload.is_completed = issue.is_completed;
         fetch('/api/overlay/' + encodeURIComponent(editingIssueId), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

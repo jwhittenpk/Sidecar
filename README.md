@@ -83,7 +83,9 @@ Never commit `.env` or share your token; it has access to your Linear data.
 | `.env.example` | Example env file; copy to `.env` and add your key |
 | `.github/workflows/` | CI: tests on PRs, release + CHANGELOG on push to main |
 | `app.py` | Flask app: routes, Linear API client, overlay read/write, merge logic |
-| `overlay.json` | Local file storing notes, personal priority, status, column preferences (created on first save; do not commit) |
+| `settings.json` | Column order/visibility (created on first run or migrated from overlay.json; do not commit) |
+| `inprogress.json` | Per-issue overlay for non-completed Linear issues (notes, personal priority, status); do not commit |
+| `completed.json` | Per-issue overlay for completed Linear issues (notes, status only); do not commit |
 | `templates/index.html` | Single-page dashboard UI (HTML + embedded CSS and JS) |
 | `tests/` | Unit tests for routes, overlay, and Linear parsing |
 

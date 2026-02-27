@@ -129,6 +129,10 @@ celerybeat.pid
 
 # Sidecar local overlay data (never commit)
 overlay.json
+overlay.old
+settings.json
+inprogress.json
+completed.json
 
 # Environments
 .env

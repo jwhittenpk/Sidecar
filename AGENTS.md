@@ -4,12 +4,12 @@ This file is for AI coding agents (e.g. Cursor) working on this codebase.
 
 ## Project summary
 
-**Sidecar** is a personal overlay dashboard for Linear tickets. It runs locally (Flask on localhost:5000), fetches issues assigned to the user from the Linear GraphQL API (**read-only**), and stores **personal context** (notes, personal priority, personal status) in a single local JSON file (`overlay.json`). It is not a Linear replacement; it is a private overlay that never sends personal data to Linear or anywhere else.
+**Sidecar** is a personal overlay dashboard for Linear tickets. It runs locally (Flask on localhost:5000), fetches issues assigned to the user from the Linear GraphQL API (**read-only**), and stores **personal context** (notes, personal priority, personal status) in local JSON files next to the app. It is not a Linear replacement; it is a private overlay that never sends personal data to Linear or anywhere else.
 
 ## Architecture
 
 - **Backend:** Python, Flask. Single module `app.py`: routes, Linear API client, overlay file I/O, merge logic.
-- **Data:** One JSON file `overlay.json` next to the app; keyed by Linear issue ID (e.g. `LIN-123`). No database.
+- **Data:** Local JSON files next to the app: `settings.json` (column preferences only), `inprogress.json` and `completed.json` (per-issue overlay split by Linear completion state). Existing `overlay.json` is migrated once to this split and renamed to `overlay.old`. No database.
 - **Frontend:** One HTML file `templates/index.html` with embedded CSS and JavaScript. No React, no build tools, no separate JS/CSS files.
 - **Linear:** Read-only. All requests use `Authorization: <token>` (no "Bearer"). Token from `.env` via `python-dotenv` (`LINEAR_GRAPHQL_API`).
 
@@ -22,7 +22,7 @@ This file is for AI coding agents (e.g. Cursor) working on this codebase.
 ## Key conventions
 
 1. **Linear is read-only.** Never write or update data in Linear from this app.
-2. **Overlay data stays local.** All notes, personal priority, and personal status live only in `overlay.json`. Never send overlay data to Linear or any external service.
+2. **Overlay data stays local.** All notes, personal priority, and personal status live only in `inprogress.json` and `completed.json` (and settings in `settings.json`). Never send overlay data to Linear or any external service.
 3. **Refresh must not overwrite overlay.** When the user clicks Refresh, the app refetches from Linear and merges with the existing overlay file. The overlay file is only written when the user explicitly saves from the UI (`POST /api/overlay/<issue_id>`).
 4. **Tests required.** Every new feature or fix must include or update unit tests. A task is not done until `pytest tests/` passes.
 5. **Single frontend file.** Keep the UI in one `templates/index.html` with embedded `<style>` and `<script>`. Do not split into separate CSS/JS files or introduce a frontend framework.
@@ -60,7 +60,7 @@ All tests must pass before considering a task complete. Mock all Linear API call
 ## What to avoid
 
 - No external frontend frameworks (React, Vue, etc.).
-- No database (only `overlay.json`).
+- No database (only local JSON files: `settings.json`, `inprogress.json`, `completed.json`).
 - No user authentication (single-user local app).
 - No background polling (user triggers refresh via the UI).
 - No writing to Linear.

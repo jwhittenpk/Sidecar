@@ -1,6 +1,6 @@
 """
 Sidecar — A personal overlay dashboard for Linear tickets.
-Flask backend: read-only Linear API, local overlay.json for notes/priority/status.
+Flask backend: read-only Linear API, local overlay files for notes/priority/status.
 """
 
 import copy
@@ -22,7 +22,14 @@ load_dotenv()  # also allow cwd .env to override
 app = Flask(__name__)
 
 LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql"
-OVERLAY_PATH = Path(__file__).parent / "overlay.json"
+_app_dir = Path(__file__).parent
+SETTINGS_PATH = _app_dir / "settings.json"
+INPROGRESS_PATH = _app_dir / "inprogress.json"
+COMPLETED_PATH = _app_dir / "completed.json"
+OVERLAY_LEGACY_PATH = _app_dir / "overlay.json"
+OVERLAY_OLD_PATH = _app_dir / "overlay.old"
+# Legacy single-file path for tests that patch before migration
+OVERLAY_PATH = _app_dir / "overlay.json"
 PAGE_SIZE = 50
 
 # In-memory cache: list of merged issue dicts, and when we last fetched from Linear.
@@ -50,6 +57,8 @@ PERSONAL_STATUS_OPTIONS = [
     "Waiting On Review",
     "Blocked",
     "Ready to Close",
+    "Completed",
+    "Notable",
 ]
 
 # Cycle sort: status order within current/future cycle (lower index first)
@@ -78,6 +87,124 @@ COLUMN_REGISTRY = [
 ]
 DEFAULT_COLUMN_ORDER = [c["id"] for c in COLUMN_REGISTRY]
 _REGISTRY_IDS = frozenset(c["id"] for c in COLUMN_REGISTRY)
+RESERVED_KEYS = (COLUMN_VISIBILITY_KEY, COLUMN_PREFERENCES_KEY)
+
+
+def _migrate_overlay_to_split():
+    """One-time migration: overlay.json -> settings.json + inprogress.json + completed.json; rename overlay.json to overlay.old.
+    Idempotent: only runs when SETTINGS_PATH does not exist."""
+    if SETTINGS_PATH.exists():
+        return
+    if OVERLAY_LEGACY_PATH.exists():
+        try:
+            with open(OVERLAY_LEGACY_PATH, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            raw = {}
+        # Build settings: column_preferences only (migrate legacy column_visibility)
+        default_vis = {c["id"]: c["default_visible"] for c in COLUMN_REGISTRY}
+        prefs = raw.get(COLUMN_PREFERENCES_KEY)
+        if isinstance(prefs, dict) and isinstance(prefs.get("order"), list) and isinstance(prefs.get("visibility"), dict):
+            if _valid_column_order(prefs["order"]):
+                merged_vis = {**default_vis, **{k: bool(v) for k, v in prefs["visibility"].items() if k in default_vis}}
+                settings = {COLUMN_PREFERENCES_KEY: {"order": list(prefs["order"]), "visibility": merged_vis}}
+            else:
+                settings = {COLUMN_PREFERENCES_KEY: {"order": list(DEFAULT_COLUMN_ORDER), "visibility": default_vis}}
+        else:
+            leg = raw.get(COLUMN_VISIBILITY_KEY)
+            if isinstance(leg, dict):
+                merged_vis = {**default_vis, **{k: bool(v) for k, v in leg.items() if k in default_vis}}
+                settings = {COLUMN_PREFERENCES_KEY: {"order": list(DEFAULT_COLUMN_ORDER), "visibility": merged_vis}}
+            else:
+                settings = {COLUMN_PREFERENCES_KEY: {"order": list(DEFAULT_COLUMN_ORDER), "visibility": default_vis}}
+        with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
+            json.dump(settings, f, indent=2)
+        # Issue entries -> inprogress; completed empty
+        inprogress = {k: v for k, v in raw.items() if k not in RESERVED_KEYS and isinstance(v, dict)}
+        with open(INPROGRESS_PATH, "w", encoding="utf-8") as f:
+            json.dump(inprogress, f, indent=2)
+        with open(COMPLETED_PATH, "w", encoding="utf-8") as f:
+            json.dump({}, f, indent=2)
+        OVERLAY_LEGACY_PATH.rename(OVERLAY_OLD_PATH)
+    else:
+        default_vis = {c["id"]: c["default_visible"] for c in COLUMN_REGISTRY}
+        settings = {COLUMN_PREFERENCES_KEY: {"order": list(DEFAULT_COLUMN_ORDER), "visibility": default_vis}}
+        with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
+            json.dump(settings, f, indent=2)
+        with open(INPROGRESS_PATH, "w", encoding="utf-8") as f:
+            json.dump({}, f, indent=2)
+        with open(COMPLETED_PATH, "w", encoding="utf-8") as f:
+            json.dump({}, f, indent=2)
+
+
+def ensure_migrated():
+    """Ensure split overlay layout exists; run one-time migration if needed."""
+    _migrate_overlay_to_split()
+
+
+def read_settings():
+    """Return settings dict from settings.json. Empty dict if missing. No migration (call ensure_migrated first)."""
+    if not SETTINGS_PATH.exists():
+        return {}
+    try:
+        with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def write_settings(settings_dict):
+    """Write settings dict to settings.json."""
+    with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
+        json.dump(settings_dict, f, indent=2)
+
+
+def read_inprogress_overlay():
+    """Return inprogress overlay dict (issue_id -> entry). Empty if file missing. No migration."""
+    if not INPROGRESS_PATH.exists():
+        return {}
+    try:
+        with open(INPROGRESS_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def read_completed_overlay():
+    """Return completed overlay dict (issue_id -> entry). Empty if file missing. No migration."""
+    if not COMPLETED_PATH.exists():
+        return {}
+    try:
+        with open(COMPLETED_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def write_inprogress_overlay(overlay):
+    """Write inprogress overlay dict to inprogress.json."""
+    with open(INPROGRESS_PATH, "w", encoding="utf-8") as f:
+        json.dump(overlay, f, indent=2)
+
+
+def write_completed_overlay(overlay):
+    """Write completed overlay dict to completed.json."""
+    with open(COMPLETED_PATH, "w", encoding="utf-8") as f:
+        json.dump(overlay, f, indent=2)
+
+
+def read_issue_overlay():
+    """Return merged issue overlay (inprogress + completed). Resolves priority conflicts on inprogress; may write back inprogress."""
+    ensure_migrated()
+    inprog = read_inprogress_overlay()
+    completed = read_completed_overlay()
+    resolved = resolve_priority_conflicts(inprog)
+    if resolved != inprog:
+        logging.warning(
+            "Overlay had duplicate personal_priority values; auto-resolved and rewrote inprogress.json"
+        )
+        write_inprogress_overlay(resolved)
+    return {**resolved, **completed}
 
 
 def get_linear_token():
@@ -228,47 +355,30 @@ def fetch_linear_issues():
 
 
 def read_overlay():
-    """Return overlay dict (issue_id -> overlay entry). Empty dict if file missing.
-    Resolves priority conflicts on load; if fixed, logs a warning and writes back."""
-    if not OVERLAY_PATH.exists():
-        return {}
-    try:
-        with open(OVERLAY_PATH, "r", encoding="utf-8") as f:
-            raw = json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return {}
-    resolved = resolve_priority_conflicts(raw)
-    if resolved != raw:
-        logging.warning(
-            "Overlay had duplicate personal_priority values; auto-resolved and rewrote overlay.json"
-        )
-        write_overlay(resolved)
-        return resolved
-    return raw
+    """Return merged issue overlay dict (issue_id -> overlay entry). Uses inprogress.json + completed.json.
+    Resolves priority conflicts on inprogress; may write back inprogress.json."""
+    ensure_migrated()
+    return read_issue_overlay()
 
 
 def write_overlay(overlay):
-    """Write the entire overlay dict to overlay.json in one write."""
-    with open(OVERLAY_PATH, "w", encoding="utf-8") as f:
-        json.dump(overlay, f, indent=2)
+    """Write full overlay dict to split files. All issue entries go to inprogress; completed cleared.
+    Kept for backward compat (e.g. tests). Prefer write_inprogress_overlay/write_completed_overlay for targeted writes."""
+    ensure_migrated()
+    issue_entries = {k: v for k, v in overlay.items() if k not in RESERVED_KEYS and isinstance(v, dict)}
+    write_inprogress_overlay(issue_entries)
+    write_completed_overlay({})
 
 
 def get_column_visibility():
-    """Return column visibility dict from overlay; if missing, return defaults from COLUMN_REGISTRY."""
-    overlay = read_overlay()
-    vis = overlay.get(COLUMN_VISIBILITY_KEY)
-    if isinstance(vis, dict):
-        # Merge with defaults so new columns get default_visible
-        default_vis = {c["id"]: c["default_visible"] for c in COLUMN_REGISTRY}
-        return {**default_vis, **vis}
-    return {c["id"]: c["default_visible"] for c in COLUMN_REGISTRY}
+    """Return column visibility dict from settings; if missing, return defaults from COLUMN_REGISTRY."""
+    return get_column_preferences()["visibility"]
 
 
 def write_column_visibility(visibility_dict):
-    """Write column_visibility to overlay.json; preserves all other overlay keys. Legacy; prefer write_column_preferences."""
-    overlay = read_overlay()
-    overlay[COLUMN_VISIBILITY_KEY] = dict(visibility_dict)
-    write_overlay(overlay)
+    """Write column visibility; persists to settings.json. Legacy; prefer write_column_preferences."""
+    prefs = get_column_preferences()
+    write_column_preferences(prefs["order"], visibility_dict)
 
 
 def _valid_column_order(order):
@@ -279,9 +389,10 @@ def _valid_column_order(order):
 
 
 def get_column_preferences():
-    """Return { order: [...], visibility: {...} } from overlay. Migrates from column_visibility if needed."""
-    overlay = read_overlay()
-    prefs = overlay.get(COLUMN_PREFERENCES_KEY)
+    """Return { order: [...], visibility: {...} } from settings.json. Migrates legacy column_visibility only during migration."""
+    ensure_migrated()
+    settings = read_settings()
+    prefs = settings.get(COLUMN_PREFERENCES_KEY)
     if isinstance(prefs, dict):
         order = prefs.get("order")
         vis = prefs.get("visibility")
@@ -290,19 +401,6 @@ def get_column_preferences():
                 default_vis = {c["id"]: c["default_visible"] for c in COLUMN_REGISTRY}
                 merged_vis = {**default_vis, **{k: bool(v) for k, v in vis.items() if k in default_vis}}
                 return {"order": list(order), "visibility": merged_vis}
-    # Legacy migration
-    leg = overlay.get(COLUMN_VISIBILITY_KEY)
-    if isinstance(leg, dict):
-        default_vis = {c["id"]: c["default_visible"] for c in COLUMN_REGISTRY}
-        merged_vis = {**default_vis, **{k: bool(v) for k, v in leg.items() if k in default_vis}}
-        new_prefs = {"order": list(DEFAULT_COLUMN_ORDER), "visibility": merged_vis}
-        overlay = read_overlay()
-        overlay[COLUMN_PREFERENCES_KEY] = new_prefs
-        if COLUMN_VISIBILITY_KEY in overlay:
-            del overlay[COLUMN_VISIBILITY_KEY]
-        write_overlay(overlay)
-        return {"order": new_prefs["order"], "visibility": new_prefs["visibility"]}
-    # Missing: return defaults
     return {
         "order": list(DEFAULT_COLUMN_ORDER),
         "visibility": {c["id"]: c["default_visible"] for c in COLUMN_REGISTRY},
@@ -310,30 +408,44 @@ def get_column_preferences():
 
 
 def write_column_preferences(order_list, visibility_dict):
-    """Write column_preferences to overlay.json; preserves all other overlay keys. Removes legacy column_visibility."""
-    overlay = read_overlay()
-    overlay[COLUMN_PREFERENCES_KEY] = {"order": list(order_list), "visibility": dict(visibility_dict)}
-    if COLUMN_VISIBILITY_KEY in overlay:
-        del overlay[COLUMN_VISIBILITY_KEY]
-    write_overlay(overlay)
+    """Write column_preferences to settings.json only."""
+    ensure_migrated()
+    settings = read_settings()
+    settings[COLUMN_PREFERENCES_KEY] = {"order": list(order_list), "visibility": dict(visibility_dict)}
+    write_settings(settings)
 
 
-def write_overlay_entry(issue_id, data):
-    """Update overlay with one entry; merge with existing. data: personal_priority, personal_status, notes."""
-    overlay = read_overlay()
+def write_overlay_entry(issue_id, data, is_completed=None):
+    """Update overlay with one entry; write to inprogress or completed based on is_completed.
+    data: personal_priority, personal_status, notes. personal_priority is stripped when is_completed is True."""
+    ensure_migrated()
     key = _overlay_key(issue_id)
-    entry = overlay.get(key, {})
+    if not key:
+        return None
+    inprog = read_inprogress_overlay()
+    completed = read_completed_overlay()
+    entry = (inprog.get(key) or completed.get(key) or {}).copy()
     if "personal_priority" in data:
-        entry["personal_priority"] = data["personal_priority"]
+        entry["personal_priority"] = data["personal_priority"] if not is_completed else None
     if "personal_status" in data:
         entry["personal_status"] = data.get("personal_status", "")
     if "notes" in data:
         entry["notes"] = data.get("notes", "")
     entry["last_updated"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
-    overlay[key] = entry
-    with open(OVERLAY_PATH, "w", encoding="utf-8") as f:
-        json.dump(overlay, f, indent=2)
-    return entry
+    if is_completed:
+        entry_clean = {k: v for k, v in entry.items() if k != "personal_priority"}
+        if key in inprog:
+            inprog = {k: v for k, v in inprog.items() if k != key}
+            write_inprogress_overlay(inprog)
+        completed[key] = entry_clean
+        write_completed_overlay(completed)
+    else:
+        if key in completed:
+            completed = {k: v for k, v in completed.items() if k != key}
+            write_completed_overlay(completed)
+        inprog[key] = entry
+        write_inprogress_overlay(inprog)
+    return entry if not is_completed else {k: v for k, v in entry.items() if k != "personal_priority"}
 
 
 def _overlay_key(issue_id):
@@ -812,19 +924,27 @@ def get_last_fetched():
 
 def refresh_cache():
     """Force refetch from Linear, update cache, return merged issues.
-    Completed/cancelled issues have their personal priority removed and list rebalanced (one write)."""
+    Moves overlay entries between inprogress/completed by Linear is_completed; rebalances inprogress only."""
     global _issues_cache, _last_fetched
+    ensure_migrated()
     linear = fetch_linear_issues()
-    overlay = read_overlay()
-    completed_with_priority = [
-        issue.get("identifier") or issue.get("id")
-        for issue in linear
-        if issue.get("is_completed")
-        and (overlay.get(issue.get("identifier") or issue.get("id")) or {}).get("personal_priority") is not None
-    ]
+    inprog = read_inprogress_overlay()
+    completed_d = read_completed_overlay()
+    completed_ids = {issue.get("identifier") or issue.get("id") for issue in linear if issue.get("is_completed")}
+    active_ids = {issue.get("identifier") or issue.get("id") for issue in linear if not issue.get("is_completed")}
+    completed_with_priority = [iid for iid in completed_ids if (inprog.get(iid) or {}).get("personal_priority") is not None]
     if completed_with_priority:
-        overlay = rebalance_overlay_after_remove_multiple(overlay, completed_with_priority)
-        write_overlay(overlay)
+        inprog = rebalance_overlay_after_remove_multiple(inprog, completed_with_priority)
+    for key in list(inprog.keys()):
+        if key in completed_ids:
+            entry = inprog.pop(key)
+            completed_d[key] = {k: v for k, v in entry.items() if k != "personal_priority"}
+    for key in list(completed_d.keys()):
+        if key in active_ids:
+            inprog[key] = completed_d.pop(key)
+    write_inprogress_overlay(inprog)
+    write_completed_overlay(completed_d)
+    overlay = {**inprog, **completed_d}
     _issues_cache = merge_issues(linear, overlay)
     _last_fetched = datetime.now(timezone.utc).isoformat()
     return _issues_cache
@@ -891,49 +1011,61 @@ def api_refresh():
         return jsonify({"error": str(e)}), 502
 
 
+def _is_issue_completed(issue_id, data, cache):
+    """Return True if issue is completed. Prefer data.get('is_completed'), else lookup in cache."""
+    if "is_completed" in data:
+        return bool(data["is_completed"])
+    if cache:
+        for issue in cache:
+            if (issue.get("identifier") or issue.get("id")) == issue_id:
+                return bool(issue.get("is_completed"))
+    return False
+
+
 @app.route("/api/overlay/<issue_id>", methods=["POST"])
 def api_overlay_save(issue_id):
+    global _issues_cache
     if not issue_id or not _overlay_key(issue_id):
         return jsonify({"error": "Invalid issue_id"}), 400
     data = request.get_json(force=True, silent=True) or {}
-    allowed = {"personal_priority", "personal_status", "notes"}
-    payload = {k: data[k] for k in allowed if k in data}
+    allowed = {"personal_priority", "personal_status", "notes", "is_completed"}
+    payload = {k: data[k] for k in allowed if k in data and k != "is_completed"}
     if "personal_status" in payload:
         val = payload.get("personal_status", "")
         if val not in PERSONAL_STATUS_OPTIONS:
             return jsonify({"error": "Invalid personal_status"}), 400
     key = _overlay_key(issue_id)
     try:
-        overlay = read_overlay()
-        if "personal_priority" in payload:
+        cache = get_cached_issues() if _issues_cache is not None else None
+        is_completed = _is_issue_completed(key, data, cache)
+        if "personal_priority" in payload and not is_completed:
+            inprog = read_inprogress_overlay()
             pri = payload.get("personal_priority")
             if pri is None or (isinstance(pri, str) and pri.strip() == ""):
-                new_overlay = rebalance_overlay_after_remove(overlay, issue_id)
+                new_inprog = rebalance_overlay_after_remove(inprog, issue_id)
             else:
                 try:
                     n = int(pri)
-                    # When changing an existing priority (move to lower position), remove first so we close the gap, then assign. Otherwise assigning would "insert" and push others down.
-                    if overlay.get(key, {}).get("personal_priority") is not None:
-                        overlay = rebalance_overlay_after_remove(overlay, issue_id)
-                    new_overlay = rebalance_overlay_after_assign(overlay, issue_id, n)
+                    if inprog.get(key, {}).get("personal_priority") is not None:
+                        inprog = rebalance_overlay_after_remove(inprog, issue_id)
+                    new_inprog = rebalance_overlay_after_assign(inprog, issue_id, n)
                 except (TypeError, ValueError):
-                    new_overlay = overlay
+                    new_inprog = inprog
             for k in ("personal_status", "notes"):
                 if k in payload:
-                    if key not in new_overlay:
-                        new_overlay[key] = {}
-                    new_overlay[key][k] = payload.get(k, "" if k == "personal_status" else "")
-            new_overlay[key] = new_overlay.get(key, {})
-            new_overlay[key]["last_updated"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
-            write_overlay(new_overlay)
-            # Invalidate cache so next GET /api/issues (e.g. after browser refresh) re-reads overlay from disk
-            global _issues_cache
+                    if key not in new_inprog:
+                        new_inprog[key] = {}
+                    new_inprog[key][k] = payload.get(k, "" if k == "personal_status" else "")
+            new_inprog[key] = new_inprog.get(key, {})
+            new_inprog[key]["last_updated"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+            write_inprogress_overlay(new_inprog)
             _issues_cache = None
-            entry = new_overlay[key]
-            return jsonify({"ok": True, "entry": entry, "overlay": new_overlay})
-        else:
-            entry = write_overlay_entry(issue_id, payload)
-            return jsonify({"ok": True, "entry": entry})
+            entry = new_inprog[key]
+            full_overlay = read_overlay()
+            return jsonify({"ok": True, "entry": entry, "overlay": full_overlay})
+        entry = write_overlay_entry(issue_id, payload, is_completed=is_completed)
+        _issues_cache = None
+        return jsonify({"ok": True, "entry": entry})
     except (OSError, TypeError) as e:
         return jsonify({"error": str(e)}), 500
 
