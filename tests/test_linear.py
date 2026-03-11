@@ -328,16 +328,48 @@ def test_refresh_removes_priority_for_completed_and_rebalances(tmp_path):
         }), encoding="utf-8")
         (tmp_path / "completed.json").write_text("{}", encoding="utf-8")
         linear_issues = [
-            {"id": "u1", "identifier": "LIN-1", "title": "Active", "is_completed": False},
-            {"id": "u2", "identifier": "LIN-2", "title": "Done", "is_completed": True},
-            {"id": "u3", "identifier": "LIN-3", "title": "Active2", "is_completed": False},
+            {"id": "u1", "identifier": "LIN-1", "title": "Active", "linear_status": "In Progress", "is_completed": False},
+            {"id": "u2", "identifier": "LIN-2", "title": "Done", "linear_status": "Done", "is_completed": True},
+            {"id": "u3", "identifier": "LIN-3", "title": "Active2", "linear_status": "In Progress", "is_completed": False},
         ]
         with patch.object(app_module, "fetch_linear_issues", return_value=linear_issues):
             app_module.refresh_cache()
         overlay = app_module.read_overlay()
         assert overlay.get("LIN-2", {}).get("personal_priority") is None
+        assert overlay["LIN-2"]["personal_status"] == "Completed"
         assert overlay["LIN-1"]["personal_priority"] == 1
         assert overlay["LIN-3"]["personal_priority"] == 2
+    finally:
+        (app_module.SETTINGS_PATH, app_module.INPROGRESS_PATH, app_module.COMPLETED_PATH,
+         app_module.OVERLAY_LEGACY_PATH, app_module.OVERLAY_OLD_PATH) = orig
+
+
+def test_refresh_sets_personal_status_canceled_when_linear_canceled(tmp_path):
+    """On refresh, when an issue moves to completed and Linear status is Canceled, personal_status becomes Canceled."""
+    import json
+    orig = (app_module.SETTINGS_PATH, app_module.INPROGRESS_PATH, app_module.COMPLETED_PATH,
+            app_module.OVERLAY_LEGACY_PATH, app_module.OVERLAY_OLD_PATH)
+    try:
+        app_module.SETTINGS_PATH = tmp_path / "settings.json"
+        app_module.INPROGRESS_PATH = tmp_path / "inprogress.json"
+        app_module.COMPLETED_PATH = tmp_path / "completed.json"
+        app_module.OVERLAY_LEGACY_PATH = tmp_path / "overlay.json"
+        app_module.OVERLAY_OLD_PATH = tmp_path / "overlay.old"
+        default_vis = {c["id"]: c["default_visible"] for c in app_module.COLUMN_REGISTRY}
+        (tmp_path / "settings.json").write_text(json.dumps({
+            app_module.COLUMN_PREFERENCES_KEY: {"order": list(app_module.DEFAULT_COLUMN_ORDER), "visibility": default_vis}
+        }), encoding="utf-8")
+        (tmp_path / "inprogress.json").write_text(json.dumps({
+            "LIN-1": {"personal_priority": 1, "personal_status": "In Progress", "notes": "a"},
+        }), encoding="utf-8")
+        (tmp_path / "completed.json").write_text("{}", encoding="utf-8")
+        linear_issues = [
+            {"id": "u1", "identifier": "LIN-1", "title": "Canceled", "linear_status": "Canceled", "is_completed": True},
+        ]
+        with patch.object(app_module, "fetch_linear_issues", return_value=linear_issues):
+            app_module.refresh_cache()
+        overlay = app_module.read_overlay()
+        assert overlay["LIN-1"]["personal_status"] == "Canceled"
     finally:
         (app_module.SETTINGS_PATH, app_module.INPROGRESS_PATH, app_module.COMPLETED_PATH,
          app_module.OVERLAY_LEGACY_PATH, app_module.OVERLAY_OLD_PATH) = orig
