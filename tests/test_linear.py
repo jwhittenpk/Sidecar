@@ -308,14 +308,25 @@ def test_fetch_all_assigned_issues_runs_without_viewer_id():
 
 def test_refresh_removes_priority_for_completed_and_rebalances(tmp_path):
     """On refresh, completed issues have their personal priority removed and list is rebalanced."""
-    original_path = app_module.OVERLAY_PATH
+    import json
+    orig = (app_module.SETTINGS_PATH, app_module.INPROGRESS_PATH, app_module.COMPLETED_PATH,
+            app_module.OVERLAY_LEGACY_PATH, app_module.OVERLAY_OLD_PATH)
     try:
-        app_module.OVERLAY_PATH = tmp_path / "overlay.json"
-        app_module.write_overlay({
+        app_module.SETTINGS_PATH = tmp_path / "settings.json"
+        app_module.INPROGRESS_PATH = tmp_path / "inprogress.json"
+        app_module.COMPLETED_PATH = tmp_path / "completed.json"
+        app_module.OVERLAY_LEGACY_PATH = tmp_path / "overlay.json"
+        app_module.OVERLAY_OLD_PATH = tmp_path / "overlay.old"
+        default_vis = {c["id"]: c["default_visible"] for c in app_module.COLUMN_REGISTRY}
+        (tmp_path / "settings.json").write_text(json.dumps({
+            app_module.COLUMN_PREFERENCES_KEY: {"order": list(app_module.DEFAULT_COLUMN_ORDER), "visibility": default_vis}
+        }), encoding="utf-8")
+        (tmp_path / "inprogress.json").write_text(json.dumps({
             "LIN-1": {"personal_priority": 1, "notes": "a"},
             "LIN-2": {"personal_priority": 2, "notes": "b"},
             "LIN-3": {"personal_priority": 3, "notes": "c"},
-        })
+        }), encoding="utf-8")
+        (tmp_path / "completed.json").write_text("{}", encoding="utf-8")
         linear_issues = [
             {"id": "u1", "identifier": "LIN-1", "title": "Active", "is_completed": False},
             {"id": "u2", "identifier": "LIN-2", "title": "Done", "is_completed": True},
@@ -328,7 +339,8 @@ def test_refresh_removes_priority_for_completed_and_rebalances(tmp_path):
         assert overlay["LIN-1"]["personal_priority"] == 1
         assert overlay["LIN-3"]["personal_priority"] == 2
     finally:
-        app_module.OVERLAY_PATH = original_path
+        (app_module.SETTINGS_PATH, app_module.INPROGRESS_PATH, app_module.COMPLETED_PATH,
+         app_module.OVERLAY_LEGACY_PATH, app_module.OVERLAY_OLD_PATH) = orig
 
 
 def test_personal_priority_sort_unranked_use_cycle_order():

@@ -37,16 +37,6 @@ def mock_linear_fetch():
         yield m
 
 
-@pytest.fixture
-def temp_overlay_path(tmp_path):
-    """Use temp overlay file for route tests that write overlay."""
-    path = tmp_path / "overlay.json"
-    original = app_module.OVERLAY_PATH
-    app_module.OVERLAY_PATH = path
-    yield path
-    app_module.OVERLAY_PATH = original
-
-
 def test_get_index_returns_200_and_html():
     """GET / returns 200 and HTML content."""
     client = app_module.app.test_client()
@@ -110,8 +100,8 @@ def test_post_api_overlay_saves_and_returns_success(temp_overlay_path, mock_line
     assert data["entry"]["notes"] == "My note"
     assert data["entry"]["personal_status"] == "Blocked"
     assert data["entry"]["personal_priority"] == 1
-    assert temp_overlay_path.exists()
-    with open(temp_overlay_path, encoding="utf-8") as f:
+    assert app_module.INPROGRESS_PATH.exists()
+    with open(app_module.INPROGRESS_PATH, encoding="utf-8") as f:
         overlay = json.load(f)
     assert "LIN-99" in overlay
     assert overlay["LIN-99"]["notes"] == "My note"
@@ -209,7 +199,7 @@ def test_post_overlay_priority_response_has_full_rebalanced_overlay(temp_overlay
 
 
 def test_post_overlay_rebalance_writes_once(temp_overlay_path, mock_linear_fetch):
-    """When POST causes rebalancing, write_overlay is called once."""
+    """When POST causes rebalancing, write_inprogress_overlay is called once."""
     from unittest.mock import patch
     client = app_module.app.test_client()
     client.post(
@@ -217,7 +207,7 @@ def test_post_overlay_rebalance_writes_once(temp_overlay_path, mock_linear_fetch
         data=json.dumps({"personal_priority": 1}),
         content_type="application/json",
     )
-    with patch.object(app_module, "write_overlay") as mock_write:
+    with patch.object(app_module, "write_inprogress_overlay") as mock_write:
         resp = client.post(
             "/api/overlay/LIN-2",
             data=json.dumps({"personal_priority": 1}),
@@ -234,7 +224,7 @@ def test_post_overlay_move_to_last_does_not_push_down(temp_overlay_path, mock_li
         for i in range(1, 10)
     ]
     overlay = {f"LIN-{i}": {"personal_priority": i, "notes": ""} for i in range(1, 10)}
-    temp_overlay_path.write_text(json.dumps(overlay))
+    app_module.INPROGRESS_PATH.write_text(json.dumps(overlay))
     client = app_module.app.test_client()
     resp = client.post(
         "/api/overlay/LIN-4",
@@ -256,7 +246,7 @@ def test_post_overlay_invalidates_cache_so_get_issues_sees_update(temp_overlay_p
         {"id": "u1", "identifier": "LIN-1", "title": "One", "linear_priority": 2, "linear_status": "X", "is_completed": False},
         {"id": "u2", "identifier": "LIN-2", "title": "Two", "linear_priority": 2, "linear_status": "X", "is_completed": False},
     ]
-    temp_overlay_path.write_text(json.dumps({"LIN-1": {"personal_priority": 1}}))
+    app_module.INPROGRESS_PATH.write_text(json.dumps({"LIN-1": {"personal_priority": 1}}))
     client = app_module.app.test_client()
     # Populate cache
     client.get("/api/issues")
@@ -541,7 +531,7 @@ def test_get_api_issues_filter_personal_priority_set(mock_linear_fetch, temp_ove
         {"id": "u1", "identifier": "LIN-1", "title": "A", "linear_priority": 2, "linear_status": "X", "is_completed": False},
         {"id": "u2", "identifier": "LIN-2", "title": "B", "linear_priority": 2, "linear_status": "X", "is_completed": False},
     ]
-    temp_overlay_path.write_text(json.dumps({"LIN-1": {"personal_priority": 1}}))
+    app_module.INPROGRESS_PATH.write_text(json.dumps({"LIN-1": {"personal_priority": 1}}))
     client = app_module.app.test_client()
     resp = client.get("/api/issues?filter=active&personal_priority_filter=set")
     assert resp.status_code == 200
@@ -564,7 +554,7 @@ def test_get_api_issues_filter_no_matches_returns_200_empty_list(mock_linear_fet
 
 
 def test_get_api_personal_status_options_includes_new_statuses_in_order():
-    """GET /api/personal-status-options returns all statuses including new ones in correct display order."""
+    """GET /api/personal-status-options returns all statuses including Completed and Notable in correct display order."""
     client = app_module.app.test_client()
     resp = client.get("/api/personal-status-options")
     assert resp.status_code == 200
@@ -573,15 +563,17 @@ def test_get_api_personal_status_options_includes_new_statuses_in_order():
     assert "Testing" in opts
     assert "Pair Testing" in opts
     assert "Waiting on Testing" in opts
+    assert "Completed" in opts
+    assert "Notable" in opts
     idx_in_progress = opts.index("In Progress")
     idx_testing = opts.index("Testing")
-    idx_pair = opts.index("Pair Testing")
-    idx_waiting_testing = opts.index("Waiting on Testing")
-    idx_waiting_someone = opts.index("Waiting On Someone")
+    idx_ready = opts.index("Ready to Close")
+    idx_completed = opts.index("Completed")
+    idx_notable = opts.index("Notable")
     assert idx_testing > idx_in_progress
-    assert idx_pair > idx_testing
-    assert idx_waiting_testing > idx_pair
-    assert idx_waiting_someone > idx_waiting_testing
+    assert idx_ready > idx_testing
+    assert idx_completed > idx_ready
+    assert idx_notable > idx_completed
 
 
 def test_post_api_overlay_invalid_personal_status_returns_400(temp_overlay_path, mock_linear_fetch):
@@ -659,12 +651,12 @@ def test_post_api_config_columns_persists_order_and_visibility(temp_overlay_path
     data = resp.get_json()
     assert data["order"] == order
     assert data["visibility"].get("cycle") is True
-    assert temp_overlay_path.exists()
-    with open(temp_overlay_path, encoding="utf-8") as f:
-        overlay = json.load(f)
-    assert app_module.COLUMN_PREFERENCES_KEY in overlay
-    assert overlay[app_module.COLUMN_PREFERENCES_KEY]["order"] == order
-    assert overlay[app_module.COLUMN_PREFERENCES_KEY]["visibility"]["cycle"] is True
+    assert app_module.SETTINGS_PATH.exists()
+    with open(app_module.SETTINGS_PATH, encoding="utf-8") as f:
+        settings = json.load(f)
+    assert app_module.COLUMN_PREFERENCES_KEY in settings
+    assert settings[app_module.COLUMN_PREFERENCES_KEY]["order"] == order
+    assert settings[app_module.COLUMN_PREFERENCES_KEY]["visibility"]["cycle"] is True
 
 
 def test_post_api_config_columns_duplicate_order_returns_400(temp_overlay_path):

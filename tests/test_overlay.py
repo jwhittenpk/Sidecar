@@ -5,36 +5,24 @@ import json
 import pytest
 from pathlib import Path
 
-# Import app module and patch OVERLAY_PATH in tests
 import app as app_module
 
 
-@pytest.fixture
-def temp_overlay_path(tmp_path):
-    """Use a temp file for overlay.json during tests."""
-    path = tmp_path / "overlay.json"
-    original = app_module.OVERLAY_PATH
-    app_module.OVERLAY_PATH = path
-    yield path
-    app_module.OVERLAY_PATH = original
-
-
-def test_read_missing_overlay_returns_empty_dict(temp_overlay_path):
-    """Reading a non-existent overlay file returns empty dict."""
-    assert not temp_overlay_path.exists()
+def test_read_missing_overlay_returns_empty_dict(temp_overlay_path_no_files):
+    """Reading when no split files exist runs migration and returns empty merged overlay."""
     result = app_module.read_overlay()
     assert result == {}
 
 
 def test_write_entry_creates_file(temp_overlay_path):
-    """Writing one entry creates the overlay file with correct content."""
+    """Writing one entry creates inprogress.json with correct content."""
     app_module.write_overlay_entry("LIN-1", {
         "personal_priority": 2,
         "personal_status": "In Progress",
         "notes": "Some notes",
     })
-    assert temp_overlay_path.exists()
-    with open(temp_overlay_path, encoding="utf-8") as f:
+    assert app_module.INPROGRESS_PATH.exists()
+    with open(app_module.INPROGRESS_PATH, encoding="utf-8") as f:
         data = json.load(f)
     assert "LIN-1" in data
     assert data["LIN-1"]["personal_priority"] == 2
@@ -43,12 +31,11 @@ def test_write_entry_creates_file(temp_overlay_path):
     assert "last_updated" in data["LIN-1"]
 
 
-@pytest.mark.parametrize("status", ["Testing", "Pair Testing", "Waiting on Testing"])
+@pytest.mark.parametrize("status", ["Testing", "Pair Testing", "Waiting on Testing", "Completed", "Notable"])
 def test_write_entry_saves_new_personal_statuses(temp_overlay_path, status):
-    """Each of the three new personal status values can be saved to overlay.json without error."""
+    """Personal status values including Completed and Notable can be saved without error."""
     app_module.write_overlay_entry("LIN-1", {"personal_status": status})
-    assert temp_overlay_path.exists()
-    with open(temp_overlay_path, encoding="utf-8") as f:
+    with open(app_module.INPROGRESS_PATH, encoding="utf-8") as f:
         data = json.load(f)
     assert "LIN-1" in data
     assert data["LIN-1"]["personal_status"] == status
@@ -254,8 +241,8 @@ def test_column_preferences_written_and_read(temp_overlay_path):
     vis["cycle"] = False
     vis["team"] = True
     app_module.write_column_preferences(order, vis)
-    assert temp_overlay_path.exists()
-    with open(temp_overlay_path, encoding="utf-8") as f:
+    assert app_module.SETTINGS_PATH.exists()
+    with open(app_module.SETTINGS_PATH, encoding="utf-8") as f:
         data = json.load(f)
     assert app_module.COLUMN_PREFERENCES_KEY in data
     prefs = data[app_module.COLUMN_PREFERENCES_KEY]
@@ -314,21 +301,46 @@ def test_hidden_columns_retain_position_in_order(temp_overlay_path):
     assert read_prefs2["order"].index("cycle") == cycle_idx
 
 
-def test_column_preferences_migration_from_legacy(temp_overlay_path):
-    """Old column_visibility key is migrated to column_preferences on load."""
-    app_module.write_overlay({
+def test_column_preferences_migration_from_legacy(temp_overlay_path_no_files):
+    """Legacy overlay.json with column_visibility is migrated to settings.json + inprogress; overlay renamed to overlay.old."""
+    legacy = {
         app_module.COLUMN_VISIBILITY_KEY: {"cycle": True, "team": False},
         "LIN-1": {"notes": "x"},
-    })
+    }
+    app_module.OVERLAY_LEGACY_PATH.write_text(json.dumps(legacy), encoding="utf-8")
     prefs = app_module.get_column_preferences()
     assert "order" in prefs
     assert prefs["order"] == app_module.DEFAULT_COLUMN_ORDER
     assert prefs["visibility"]["cycle"] is True
     assert prefs["visibility"]["team"] is False
-    with open(temp_overlay_path, encoding="utf-8") as f:
+    assert app_module.SETTINGS_PATH.exists()
+    with open(app_module.SETTINGS_PATH, encoding="utf-8") as f:
         data = json.load(f)
     assert app_module.COLUMN_PREFERENCES_KEY in data
     assert app_module.COLUMN_VISIBILITY_KEY not in data
+    assert not app_module.OVERLAY_LEGACY_PATH.exists()
+    assert app_module.OVERLAY_OLD_PATH.exists()
+    with open(app_module.INPROGRESS_PATH, encoding="utf-8") as f:
+        inprog = json.load(f)
+    assert "LIN-1" in inprog
+    assert inprog["LIN-1"]["notes"] == "x"
+    with open(app_module.COMPLETED_PATH, encoding="utf-8") as f:
+        completed = json.load(f)
+    assert completed == {}
+
+
+def test_migration_idempotent(temp_overlay_path_no_files):
+    """Running migration twice does not overwrite or re-rename; overlay.old stays."""
+    legacy = {"LIN-1": {"notes": "x"}, app_module.COLUMN_PREFERENCES_KEY: {"order": list(app_module.DEFAULT_COLUMN_ORDER), "visibility": {c["id"]: c["default_visible"] for c in app_module.COLUMN_REGISTRY}}}
+    app_module.OVERLAY_LEGACY_PATH.write_text(json.dumps(legacy), encoding="utf-8")
+    app_module.ensure_migrated()
+    assert not app_module.OVERLAY_LEGACY_PATH.exists()
+    old_path = app_module.OVERLAY_OLD_PATH
+    assert old_path.exists()
+    old_content = old_path.read_text(encoding="utf-8")
+    app_module.ensure_migrated()
+    assert old_path.exists()
+    assert old_path.read_text(encoding="utf-8") == old_content
 
 
 def test_column_preferences_missing_returns_defaults(temp_overlay_path):
@@ -345,10 +357,8 @@ def test_column_preferences_does_not_affect_issue_overlay(temp_overlay_path):
     """Issue-level overlay data is unaffected by column preferences reads/writes."""
     order = list(app_module.DEFAULT_COLUMN_ORDER)
     vis = {c["id"]: c["default_visible"] for c in app_module.COLUMN_REGISTRY}
-    app_module.write_overlay({
-        app_module.COLUMN_PREFERENCES_KEY: {"order": order, "visibility": vis},
-        "LIN-1": {"personal_priority": 1, "notes": "Note 1", "last_updated": "2025-02-01T12:00:00"},
-    })
+    app_module.write_column_preferences(order, vis)
+    app_module.write_overlay({"LIN-1": {"personal_priority": 1, "notes": "Note 1", "last_updated": "2025-02-01T12:00:00"}})
     overlay = app_module.read_overlay()
     assert "LIN-1" in overlay
     assert overlay["LIN-1"]["notes"] == "Note 1"
