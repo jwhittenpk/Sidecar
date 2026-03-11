@@ -1,3 +1,9 @@
+## v0.2.3
+
+- Merge pull request #12 from jwhittenpk/feature/sidecar-11
+- sidecar-11: feat: new personal statuses, split database and settings json
+- chore: update CHANGELOG and VERSION for v0.2.2
+
 ## v0.2.2
 
 - Merge pull request #11 from jwhittenpk/feature/sidecar-10
