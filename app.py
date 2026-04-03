@@ -49,6 +49,7 @@ PERSONAL_STATUS_OPTIONS = [
     "",
     "Not started",
     "In Progress",
+    "Meeting Scheduled",
     "Testing",
     "Pair Testing",
     "Waiting on Testing",
@@ -58,6 +59,7 @@ PERSONAL_STATUS_OPTIONS = [
     "Blocked",
     "Ready to Close",
     "Completed",
+    "Canceled",
     "Notable",
 ]
 
@@ -932,12 +934,18 @@ def refresh_cache():
     completed_d = read_completed_overlay()
     completed_ids = {issue.get("identifier") or issue.get("id") for issue in linear if issue.get("is_completed")}
     active_ids = {issue.get("identifier") or issue.get("id") for issue in linear if not issue.get("is_completed")}
+    linear_by_key = {(i.get("identifier") or i.get("id")): i for i in linear}
     completed_with_priority = [iid for iid in completed_ids if (inprog.get(iid) or {}).get("personal_priority") is not None]
     if completed_with_priority:
         inprog = rebalance_overlay_after_remove_multiple(inprog, completed_with_priority)
     for key in list(inprog.keys()):
         if key in completed_ids:
             entry = inprog.pop(key)
+            issue = linear_by_key.get(key)
+            if issue and (issue.get("linear_status") or "").strip().lower() == "canceled":
+                entry["personal_status"] = "Canceled"
+            else:
+                entry["personal_status"] = "Completed"
             completed_d[key] = {k: v for k, v in entry.items() if k != "personal_priority"}
     for key in list(completed_d.keys()):
         if key in active_ids:
