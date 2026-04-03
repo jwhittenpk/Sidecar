@@ -1,3 +1,9 @@
+## v0.2.4
+
+- Merge pull request #13 from jwhittenpk/feature/sidecar-12
+- Sidecar-12: feat: add new personal statuses, automatically complete personal statuses on Linear completion
+- chore: update CHANGELOG and VERSION for v0.2.3
+
 ## v0.2.3
 
 - Merge pull request #12 from jwhittenpk/feature/sidecar-11
