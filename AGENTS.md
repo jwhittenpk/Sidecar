@@ -8,10 +8,11 @@ This file is for AI coding agents (e.g. Cursor) working on this codebase.
 
 ## Architecture
 
-- **Backend:** Python, Flask. Single module `app.py`: routes, Linear API client, overlay file I/O, merge logic.
-- **Data:** Local JSON files next to the app: `settings.json` (column preferences only), `inprogress.json` and `completed.json` (per-issue overlay split by Linear completion state). Existing `overlay.json` is migrated once to this split and renamed to `overlay.old`. No database.
-- **Frontend:** One HTML file `templates/index.html` with embedded CSS and JavaScript. No React, no build tools, no separate JS/CSS files.
+- **Backend:** Python, Flask. `app.py`: routes, Linear API client, overlay file I/O, merge logic. `metrics.py`: local metrics store, Linear snapshot aggregation, GitHub PR helpers (read-only APIs).
+- **Data:** Local JSON files next to the app: `settings.json` (column preferences and optional `site` block for GitHub/metrics settings), `inprogress.json` and `completed.json` (per-issue overlay split by Linear completion state), `metrics_store.json` (Linear transition log and GitHub PR cache). Existing `overlay.json` is migrated once to this split and renamed to `overlay.old`. No database.
+- **Frontend:** Jinja templates under `templates/`: landing (`index.html`), dashboard (`dashboard.html`), metrics, settings; shared `nav.html` include. Each page uses embedded `<style>` and `<script>` only (no repo-level `.css`/`.js` bundles). Metrics may load Chart.js from a CDN. No React or other SPA framework.
 - **Linear:** Read-only. All requests use `Authorization: <token>` (no "Bearer"). Token from `.env` via `python-dotenv` (`LINEAR_GRAPHQL_API`).
+- **GitHub (metrics only):** Read-only REST usage. Token from `SIDECAR_TOKEN` (preferred) or `GITHUB_TOKEN` in the environment / `.env` (see `.env.example`). Never commit tokens. Optional tuning: `SIDECAR_GITHUB_REFRESH_COOLDOWN_SEC` (skip heavy GitHub sync on repeated Refresh), `SIDECAR_GITHUB_PR_META_FRESH_SEC`, `SIDECAR_GITHUB_PULL_PAGES` — see `.env.example`.
 
 ## Environment setup
 
@@ -22,14 +23,14 @@ This file is for AI coding agents (e.g. Cursor) working on this codebase.
 ## Key conventions
 
 1. **Linear is read-only.** Never write or update data in Linear from this app.
-2. **Overlay data stays local.** All notes, personal priority, and personal status live only in `inprogress.json` and `completed.json` (and settings in `settings.json`). Never send overlay data to Linear or any external service.
+2. **Overlay data stays local.** All notes, personal priority, and personal status live only in `inprogress.json` and `completed.json` (and settings in `settings.json`). Never send overlay data to Linear or any external service. Metrics aggregates and PR cache stay in `metrics_store.json` locally; do not ship personal overlay contents to third parties.
 3. **Refresh must not overwrite overlay.** When the user clicks Refresh, the app refetches from Linear and merges with the existing overlay file. The overlay file is only written when the user explicitly saves from the UI (`POST /api/overlay/<issue_id>`).
 4. **Tests required.** Every new feature or fix must include or update unit tests. A task is not done until `pytest tests/` passes.
-5. **Single frontend file.** Keep the UI in one `templates/index.html` with embedded `<style>` and `<script>`. Do not split into separate CSS/JS files or introduce a frontend framework.
+5. **Templates stay self-contained.** Add new pages as single Jinja files with embedded `<style>` and `<script>`; use `nav.html` for the top bar. Do not add separate CSS/JS asset files or a frontend framework.
 
 ## Personal status badge colors
 
-Badge colors in `templates/index.html` follow these rules so the palette stays consistent:
+Badge colors in `templates/dashboard.html` follow these rules so the palette stays consistent:
 
 - **Warm colors** (red, amber, orange) = urgent or blocking states (e.g. Blocked, Waiting on Me, Waiting on Someone, Waiting on Testing).
 - **Cool colors** (blue, teal, purple, green) = neutral or flow states (e.g. In Progress, Not Started, Testing, Pair Testing, Waiting on Review, Ready to Close).
@@ -60,7 +61,7 @@ All tests must pass before considering a task complete. Mock all Linear API call
 ## What to avoid
 
 - No external frontend frameworks (React, Vue, etc.).
-- No database (only local JSON files: `settings.json`, `inprogress.json`, `completed.json`).
+- No database (only local JSON files: `settings.json`, `inprogress.json`, `completed.json`, `metrics_store.json`).
 - No user authentication (single-user local app).
 - No background polling (user triggers refresh via the UI).
 - No writing to Linear.

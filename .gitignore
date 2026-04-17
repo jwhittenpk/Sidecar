@@ -127,12 +127,19 @@ celerybeat.pid
 # SageMath parsed files
 *.sage.py
 
-# Sidecar local overlay data (never commit)
+# Sidecar local data (never commit — personal notes, priorities, PR cache)
+config/settings.json
+data/
+# Legacy root locations (pre-reorganization, kept for safety)
 overlay.json
 overlay.old
 settings.json
 inprogress.json
 completed.json
+metrics_store.json
+
+# Optional local secrets directory (never commit)
+.secrets/
 
 # Environments
 .env

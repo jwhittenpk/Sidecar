@@ -7,40 +7,68 @@ from unittest.mock import patch, MagicMock
 import app as app_module
 
 
-@pytest.fixture(autouse=True)
-def reset_cache():
-    """Reset in-memory cache before each test so mocks apply."""
-    app_module._issues_cache = None
-    app_module._last_fetched = None
-    yield
-    app_module._issues_cache = None
-    app_module._last_fetched = None
+def _sample_raw_linear_node():
+    return {
+        "id": "uuid-1",
+        "identifier": "LIN-1",
+        "title": "Test issue",
+        "url": "https://linear.app/issue/LIN-1",
+        "priority": 2,
+        "updatedAt": "2025-02-20T10:00:00Z",
+        "description": "",
+        "state": {"id": "st-1", "name": "In Progress", "type": "started"},
+        "team": {"name": "Eng"},
+        "labels": {"nodes": []},
+        "cycle": None,
+    }
+
+
+def _raw_issue(
+    id,
+    identifier,
+    title,
+    *,
+    linear_priority=2,
+    updated_at="2025-02-20T10:00:00.000Z",
+    linear_status="In Progress",
+    state_type="started",
+):
+    """Minimal Linear GraphQL-shaped node for mocking _fetch_all_assigned_issues."""
+    return {
+        "id": id,
+        "identifier": identifier,
+        "title": title,
+        "url": "",
+        "priority": linear_priority,
+        "updatedAt": updated_at,
+        "description": "",
+        "state": {"id": f"st-{id}", "name": linear_status, "type": state_type},
+        "team": {"name": "Eng"},
+        "labels": {"nodes": []},
+        "cycle": None,
+    }
 
 
 @pytest.fixture
 def mock_linear_fetch():
-    """Mock fetch_linear_issues to return a fixed list (no real API calls)."""
-    with patch.object(app_module, "fetch_linear_issues") as m:
-        m.return_value = [
-            {
-                "id": "uuid-1",
-                "identifier": "LIN-1",
-                "title": "Test issue",
-                "linear_status": "In Progress",
-                "linear_priority": 2,
-                "url": "https://linear.app/issue/LIN-1",
-                "team_name": "Eng",
-                "updated_at": "2025-02-20T10:00:00Z",
-                "is_completed": False,
-            }
-        ]
+    """Mock _fetch_all_assigned_issues to return one raw Linear node (no real API calls)."""
+    with patch.object(app_module, "_fetch_all_assigned_issues", return_value=[_sample_raw_linear_node()]) as m:
         yield m
 
 
-def test_get_index_returns_200_and_html():
-    """GET / returns 200 and HTML content."""
+def test_get_landing_returns_200():
+    """GET / returns landing page HTML."""
     client = app_module.app.test_client()
     resp = client.get("/")
+    assert resp.status_code == 200
+    assert "text/html" in resp.content_type
+    assert b"Sidecar" in resp.data
+
+
+def test_get_dashboard_returns_200():
+    """GET /dashboard returns ticket dashboard HTML."""
+    client = app_module.app.test_client()
+    resp = client.get("/dashboard")
     assert resp.status_code == 200
     assert "text/html" in resp.content_type
     assert b"My Linear Dashboard" in resp.data or b"Linear" in resp.data
@@ -63,9 +91,9 @@ def test_get_api_issues_returns_json_with_expected_shape(mock_linear_fetch):
 
 
 def test_get_api_issues_when_fetch_fails_returns_400():
-    """GET /api/issues when fetch_linear_issues raises (e.g. no token) returns 400 with error message."""
+    """GET /api/issues when Linear fetch raises (e.g. no token) returns 400 with error message."""
     app_module._issues_cache = None
-    with patch.object(app_module, "fetch_linear_issues", side_effect=ValueError("LINEAR_GRAPHQL_API is not set")):
+    with patch.object(app_module, "get_linear_token", side_effect=ValueError("LINEAR_GRAPHQL_API is not set")):
         client = app_module.app.test_client()
         resp = client.get("/api/issues")
         assert resp.status_code == 400
@@ -74,13 +102,16 @@ def test_get_api_issues_when_fetch_fails_returns_400():
 
 
 def test_post_api_refresh_returns_updated_issues(mock_linear_fetch):
-    """POST /api/refresh triggers fetch and returns issues with last_fetched."""
+    """POST /api/refresh triggers fetch and returns issues with last_fetched and refresh_detail."""
     client = app_module.app.test_client()
-    resp = client.post("/api/refresh")
+    resp = client.post("/api/refresh", json={})
     assert resp.status_code == 200
     data = resp.get_json()
     assert "issues" in data
     assert "last_fetched" in data
+    assert "refresh_detail" in data
+    assert isinstance(data["refresh_detail"], dict)
+    assert data["refresh_detail"].get("linear_issue_count") == 1
     assert len(data["issues"]) == 1
     mock_linear_fetch.assert_called()
 
@@ -122,8 +153,8 @@ def test_post_api_overlay_whitespace_issue_id_returns_400():
 def test_get_api_issues_filter_active_returns_only_non_completed(mock_linear_fetch):
     """GET /api/issues?filter=active returns only issues with is_completed false."""
     mock_linear_fetch.return_value = [
-        {"id": "u1", "identifier": "LIN-1", "title": "Active", "linear_priority": 2, "is_completed": False},
-        {"id": "u2", "identifier": "LIN-2", "title": "Done", "linear_priority": 2, "is_completed": True},
+        _raw_issue("u1", "LIN-1", "Active", linear_priority=2, linear_status="In Progress", state_type="started"),
+        _raw_issue("u2", "LIN-2", "Done", linear_priority=2, linear_status="Done", state_type="completed"),
     ]
     client = app_module.app.test_client()
     resp = client.get("/api/issues?filter=active")
@@ -137,8 +168,8 @@ def test_get_api_issues_filter_active_returns_only_non_completed(mock_linear_fet
 def test_get_api_issues_filter_completed_returns_only_completed(mock_linear_fetch):
     """GET /api/issues?filter=completed returns only completed/cancelled issues."""
     mock_linear_fetch.return_value = [
-        {"id": "u1", "identifier": "LIN-1", "title": "Active", "linear_priority": 2, "is_completed": False},
-        {"id": "u2", "identifier": "LIN-2", "title": "Done", "linear_priority": 2, "is_completed": True},
+        _raw_issue("u1", "LIN-1", "Active", linear_priority=2, linear_status="In Progress", state_type="started"),
+        _raw_issue("u2", "LIN-2", "Done", linear_priority=2, linear_status="Done", state_type="completed"),
     ]
     client = app_module.app.test_client()
     resp = client.get("/api/issues?filter=completed")
@@ -220,7 +251,7 @@ def test_post_overlay_rebalance_writes_once(temp_overlay_path, mock_linear_fetch
 def test_post_overlay_move_to_last_does_not_push_down(temp_overlay_path, mock_linear_fetch):
     """Moving an issue to last position (e.g. 4 to 9) via API produces contiguous 1..9, not 10."""
     mock_linear_fetch.return_value = [
-        {"id": f"u{i}", "identifier": f"LIN-{i}", "title": f"Issue {i}", "linear_priority": 2, "linear_status": "X", "is_completed": False}
+        _raw_issue(f"u{i}", f"LIN-{i}", f"Issue {i}", linear_priority=2, linear_status="X")
         for i in range(1, 10)
     ]
     overlay = {f"LIN-{i}": {"personal_priority": i, "notes": ""} for i in range(1, 10)}
@@ -243,8 +274,8 @@ def test_post_overlay_move_to_last_does_not_push_down(temp_overlay_path, mock_li
 def test_post_overlay_invalidates_cache_so_get_issues_sees_update(temp_overlay_path, mock_linear_fetch):
     """After POST /api/overlay saves a change, next GET /api/issues returns fresh data (cache invalidated)."""
     mock_linear_fetch.return_value = [
-        {"id": "u1", "identifier": "LIN-1", "title": "One", "linear_priority": 2, "linear_status": "X", "is_completed": False},
-        {"id": "u2", "identifier": "LIN-2", "title": "Two", "linear_priority": 2, "linear_status": "X", "is_completed": False},
+        _raw_issue("u1", "LIN-1", "One", linear_priority=2, linear_status="X"),
+        _raw_issue("u2", "LIN-2", "Two", linear_priority=2, linear_status="X"),
     ]
     app_module.INPROGRESS_PATH.write_text(json.dumps({"LIN-1": {"personal_priority": 1}}))
     client = app_module.app.test_client()
@@ -486,8 +517,8 @@ def test_apply_issue_filters_no_matches_returns_empty():
 def test_get_api_issues_filter_date_from(mock_linear_fetch):
     """GET /api/issues?date_from=... returns only issues updated on or after date."""
     mock_linear_fetch.return_value = [
-        {"id": "u1", "identifier": "LIN-1", "title": "A", "linear_priority": 2, "updated_at": "2025-02-10T10:00:00Z", "linear_status": "X", "is_completed": False},
-        {"id": "u2", "identifier": "LIN-2", "title": "B", "linear_priority": 2, "updated_at": "2025-02-20T10:00:00Z", "linear_status": "Y", "is_completed": False},
+        _raw_issue("u1", "LIN-1", "A", linear_priority=2, updated_at="2025-02-10T10:00:00.000Z", linear_status="X"),
+        _raw_issue("u2", "LIN-2", "B", linear_priority=2, updated_at="2025-02-20T10:00:00.000Z", linear_status="Y"),
     ]
     client = app_module.app.test_client()
     resp = client.get("/api/issues?filter=active&date_from=2025-02-15")
@@ -500,8 +531,8 @@ def test_get_api_issues_filter_date_from(mock_linear_fetch):
 def test_get_api_issues_filter_linear_status(mock_linear_fetch):
     """GET /api/issues?linear_status=In Progress returns only that status."""
     mock_linear_fetch.return_value = [
-        {"id": "u1", "identifier": "LIN-1", "title": "A", "linear_priority": 2, "linear_status": "In Progress", "is_completed": False},
-        {"id": "u2", "identifier": "LIN-2", "title": "B", "linear_priority": 2, "linear_status": "Done", "is_completed": False},
+        _raw_issue("u1", "LIN-1", "A", linear_priority=2, linear_status="In Progress"),
+        _raw_issue("u2", "LIN-2", "B", linear_priority=2, linear_status="Done"),
     ]
     client = app_module.app.test_client()
     resp = client.get("/api/issues?filter=active&linear_status=In%20Progress")
@@ -514,8 +545,8 @@ def test_get_api_issues_filter_linear_status(mock_linear_fetch):
 def test_get_api_issues_filter_linear_priority(mock_linear_fetch):
     """GET /api/issues?linear_priority=1 returns only that priority."""
     mock_linear_fetch.return_value = [
-        {"id": "u1", "identifier": "LIN-1", "title": "A", "linear_priority": 1, "linear_status": "X", "is_completed": False},
-        {"id": "u2", "identifier": "LIN-2", "title": "B", "linear_priority": 2, "linear_status": "X", "is_completed": False},
+        _raw_issue("u1", "LIN-1", "A", linear_priority=1, linear_status="X"),
+        _raw_issue("u2", "LIN-2", "B", linear_priority=2, linear_status="X"),
     ]
     client = app_module.app.test_client()
     resp = client.get("/api/issues?filter=active&linear_priority=1")
@@ -528,8 +559,8 @@ def test_get_api_issues_filter_linear_priority(mock_linear_fetch):
 def test_get_api_issues_filter_personal_priority_set(mock_linear_fetch, temp_overlay_path):
     """GET /api/issues?personal_priority_filter=set returns only issues with personal priority."""
     mock_linear_fetch.return_value = [
-        {"id": "u1", "identifier": "LIN-1", "title": "A", "linear_priority": 2, "linear_status": "X", "is_completed": False},
-        {"id": "u2", "identifier": "LIN-2", "title": "B", "linear_priority": 2, "linear_status": "X", "is_completed": False},
+        _raw_issue("u1", "LIN-1", "A", linear_priority=2, linear_status="X"),
+        _raw_issue("u2", "LIN-2", "B", linear_priority=2, linear_status="X"),
     ]
     app_module.INPROGRESS_PATH.write_text(json.dumps({"LIN-1": {"personal_priority": 1}}))
     client = app_module.app.test_client()
@@ -543,7 +574,7 @@ def test_get_api_issues_filter_personal_priority_set(mock_linear_fetch, temp_ove
 def test_get_api_issues_filter_no_matches_returns_200_empty_list(mock_linear_fetch):
     """When filters match no issues, API returns 200 with issues: []."""
     mock_linear_fetch.return_value = [
-        {"id": "u1", "identifier": "LIN-1", "title": "A", "linear_priority": 2, "linear_status": "Todo", "is_completed": False},
+        _raw_issue("u1", "LIN-1", "A", linear_priority=2, linear_status="Todo"),
     ]
     client = app_module.app.test_client()
     resp = client.get("/api/issues?filter=active&linear_status=Done")

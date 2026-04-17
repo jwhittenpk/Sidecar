@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Settings — Sidecar{% if version %} v{{ version }}{% endif %}</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --surface: #1a2332;
+      --border: #2d3a4d;
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --link: #58a6ff;
+      --bad: #f85149;
+      --ok: #3fb950;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 1rem 2rem 2rem;
+      min-height: 100vh;
+    }
+    h1 { font-size: 1.5rem; margin: 0 0 1rem; }
+    p.hint { color: var(--text-muted); font-size: 0.875rem; max-width: 40rem; }
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.25rem;
+      margin-bottom: 1.25rem;
+      max-width: 36rem;
+    }
+    .panel h2 { font-size: 1rem; margin: 0 0 1rem; }
+    label { display: block; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.35rem; }
+    input[type="text"], textarea {
+      width: 100%;
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.5rem 0.65rem;
+      font-size: 0.875rem;
+      margin-bottom: 1rem;
+    }
+    textarea { min-height: 6rem; font-family: inherit; resize: vertical; }
+    button {
+      background: var(--link);
+      color: #fff;
+      border: none;
+      padding: 0.55rem 1.2rem;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.875rem;
+      font-weight: 500;
+    }
+    button:hover { opacity: 0.92; }
+    #msg { margin-top: 1rem; font-size: 0.875rem; color: var(--text-muted); }
+    #msg.ok { color: var(--ok); }
+    #msg.err { color: var(--bad); }
+  </style>
+</head>
+<body>
+  {% include 'nav.html' %}
+  <h1>Settings</h1>
+    <p class="hint">Site-wide options stored in <code>settings.json</code> (alongside column preferences). Put your GitHub PAT in the environment as <code>SIDECAR_TOKEN</code> (or <code>GITHUB_TOKEN</code>) — e.g. in <code>.env</code> or <code>export</code> in your shell — never saved here. For GitHub Enterprise Cloud orgs with SAML, authorize your PAT for the organization or listing PRs may return 403.</p>
+
+  <div class="panel">
+    <h2>GitHub (metrics &amp; backfill)</h2>
+    <label for="gh-org">Organization</label>
+    <input type="text" id="gh-org" autocomplete="off">
+
+    <label for="gh-login">Your GitHub username (for PR search fallback)</label>
+    <input type="text" id="gh-login" autocomplete="username">
+
+    <label for="gh-repos">Repositories (one per line, name only or org/repo)</label>
+    <textarea id="gh-repos" placeholder="int-transporter"></textarea>
+  </div>
+
+  <div class="panel">
+    <h2>Metrics</h2>
+    <label for="cycle-starts">Legacy field (optional)</label>
+    <input type="text" id="cycle-starts" placeholder="In Progress" title="Unused for the dwell chart; kept for compatibility. Dwell sums all states from your transition history.">
+
+    <label for="terminal-state">Terminal Linear state name for backfill</label>
+    <input type="text" id="terminal-state" placeholder="Done">
+  </div>
+
+  <button type="button" id="save-btn">Save settings</button>
+  <div id="msg"></div>
+
+  <script>
+    (function() {
+      const msg = document.getElementById('msg');
+      function load() {
+        fetch('/api/settings/site')
+          .then(function(r) { return r.json(); })
+          .then(function(site) {
+            var gh = site.github || {};
+            document.getElementById('gh-org').value = gh.org || '';
+            document.getElementById('gh-login').value = gh.login || '';
+            document.getElementById('gh-repos').value = (gh.repos || []).join('\n');
+            var m = site.metrics || {};
+            document.getElementById('cycle-starts').value = (m.cycle_start_states || []).join(', ');
+            document.getElementById('terminal-state').value = m.terminal_state_name || 'Done';
+          })
+          .catch(function() {
+            msg.textContent = 'Failed to load settings';
+            msg.className = 'err';
+          });
+      }
+      document.getElementById('save-btn').addEventListener('click', function() {
+        msg.textContent = '';
+        msg.className = '';
+        var reposRaw = document.getElementById('gh-repos').value.split('\n').map(function(s) { return s.trim(); }).filter(Boolean);
+        var repos = reposRaw.map(function(line) {
+          if (line.indexOf('/') >= 0) return line.split('/').pop();
+          return line;
+        });
+        var starts = document.getElementById('cycle-starts').value.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+        var body = {
+          github: {
+            org: document.getElementById('gh-org').value.trim(),
+            login: document.getElementById('gh-login').value.trim(),
+            repos: repos
+          },
+          metrics: {
+            cycle_start_states: starts.length ? starts : ['In Progress'],
+            terminal_state_name: document.getElementById('terminal-state').value.trim() || 'Done'
+          }
+        };
+        fetch('/api/settings/site', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        })
+          .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, j: j }; }); })
+          .then(function(res) {
+            if (!res.ok) {
+              msg.textContent = res.j.error || 'Save failed';
+              msg.className = 'err';
+              return;
+            }
+            msg.textContent = 'Saved.';
+            msg.className = 'ok';
+          })
+          .catch(function() {
+            msg.textContent = 'Network error';
+            msg.className = 'err';
+          });
+      });
+      load();
+    })();
+  </script>
+</body>
+</html>

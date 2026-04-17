@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Metrics — Sidecar{% if version %} v{{ version }}{% endif %}</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --surface: #1a2332;
+      --border: #2d3a4d;
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --link: #58a6ff;
+      --bad: #f85149;
+      --good: #3fb950;
+      --warn: #d29922;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 1rem 2rem 2rem;
+      min-height: 100vh;
+    }
+    h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
+    .page-subtitle { color: var(--text-muted); font-size: 0.875rem; margin: 0 0 1.25rem; }
+    p.muted { color: var(--text-muted); font-size: 0.875rem; max-width: 48rem; line-height: 1.5; margin: 0 0 0.75rem; }
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1.5rem;
+    }
+    .panel h2 { font-size: 1rem; margin: 0 0 0.5rem; color: var(--text); font-weight: 600; }
+    .panel-sub { font-size: 0.8rem; color: var(--text-muted); margin: 0 0 0.75rem; line-height: 1.4; }
+    .chart-wrap { position: relative; height: 280px; max-width: 720px; }
+    .chart-loading {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      color: var(--text-muted); font-size: 0.875rem;
+    }
+    button {
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.875rem;
+    }
+    button:hover:not(:disabled) { background: var(--border); }
+    button:disabled { opacity: 0.5; cursor: default; }
+    button.primary { background: var(--link); border-color: var(--link); color: #fff; }
+    button.primary:hover:not(:disabled) { opacity: 0.85; background: var(--link); }
+    .status-msg { margin-top: 0.6rem; font-size: 0.875rem; color: var(--text-muted); min-height: 1.2em; }
+    .status-msg.err { color: var(--bad); }
+    .status-msg.ok { color: var(--good); }
+    .error-banner { color: var(--bad); font-size: 0.875rem; margin-bottom: 1rem; display: none; }
+    .error-banner.show { display: block; }
+    .chart-hint { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.35rem; }
+    .stats-bar {
+      display: flex; flex-wrap: wrap; gap: 1.5rem;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+      padding: 0.75rem 1.25rem; margin-bottom: 1.5rem;
+      font-size: 0.875rem; color: var(--text-muted);
+      align-items: center;
+    }
+    .stats-bar strong { color: var(--text); }
+    .stats-bar .sync-info { margin-left: auto; font-size: 0.8rem; }
+    .stats-bar .sync-info.stale { color: var(--warn); }
+    .open-prs-list { margin: 0.5rem 0 0; padding: 0; list-style: none; font-size: 0.875rem; }
+    .open-prs-list li { padding: 0.3rem 0; border-bottom: 1px solid var(--border); display: flex; gap: 0.75rem; align-items: baseline; }
+    .open-prs-list li:last-child { border-bottom: none; }
+    .open-prs-list .pr-age { color: var(--warn); font-size: 0.8rem; white-space: nowrap; }
+    .open-prs-list .pr-age.fast { color: var(--text-muted); }
+    .open-prs-list a { color: var(--link); text-decoration: none; }
+    .open-prs-list a:hover { text-decoration: underline; }
+    .open-prs-list .pr-id { color: var(--text-muted); font-size: 0.8rem; }
+    .empty-note { color: var(--text-muted); font-size: 0.875rem; padding: 0.5rem 0; }
+    .sync-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+      display: none; align-items: center; justify-content: center; z-index: 100;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal-panel {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+      padding: 1.25rem; min-width: min(400px, 92vw); max-width: min(560px, 94vw);
+      max-height: min(70vh, 480px); display: flex; flex-direction: column;
+    }
+    .modal-panel h2 { margin: 0 0 0.75rem; font-size: 1rem; color: var(--text); }
+    .modal-panel ul { margin: 0; padding: 0; list-style: none; overflow-y: auto; flex: 1; font-size: 0.875rem; }
+    .modal-panel li { padding: 0.3rem 0; border-bottom: 1px solid var(--border); }
+    .modal-panel li:last-child { border-bottom: none; }
+    .modal-panel a { color: var(--link); text-decoration: none; }
+    .modal-panel a:hover { text-decoration: underline; }
+    .modal-panel .modal-actions { margin-top: 1rem; flex-shrink: 0; }
+    .modal-panel .pr-meta { display: flex; gap: 0.5rem; align-items: baseline; flex-wrap: wrap; }
+    .modal-panel .pr-title { color: var(--text); }
+    .modal-panel .pr-sub { color: var(--text-muted); font-size: 0.8rem; }
+  </style>
+</head>
+<body>
+  {% include 'nav.html' %}
+  <h1>Metrics</h1>
+  <p class="page-subtitle">Personal velocity — how long your work actually takes.</p>
+
+  <div id="load-err" class="error-banner"></div>
+
+  <div class="stats-bar" id="stats-bar">
+    <span>Loading…</span>
+  </div>
+
+  <!-- Open PRs — live aging view -->
+  <div class="panel">
+    <h2>Open pull requests</h2>
+    <p class="panel-sub">PRs in your GitHub cache that are not yet merged or closed, sorted by how long they've been waiting. Days are counted from when the PR was marked Ready for Review (or created, if it was never a draft).</p>
+    <ul class="open-prs-list" id="open-prs-list">
+      <li><span class="empty-note">Loading…</span></li>
+    </ul>
+  </div>
+
+  <!-- Merge time histogram — historical -->
+  <div class="panel">
+    <div style="display:flex; align-items:baseline; gap:1rem; flex-wrap:wrap; margin-bottom:0.5rem;">
+      <h2 style="margin:0;">Time to merge — merged PRs</h2>
+      <label for="pr-range-select" style="font-size:0.8rem; color:var(--text-muted);">
+        Show:
+        <select id="pr-range-select" style="background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:4px; padding:0.2rem 0.4rem; font-size:0.8rem; margin-left:0.25rem;">
+          <option value="30">Last 30 days</option>
+          <option value="90">Last 90 days</option>
+          <option value="180">Last 6 months</option>
+          <option value="365" selected>Last year</option>
+          <option value="0">All time</option>
+        </select>
+      </label>
+      <span id="pr-range-count" style="font-size:0.8rem; color:var(--text-muted);"></span>
+    </div>
+    <p class="panel-sub" style="margin-top:0;">How long your merged PRs sat in Ready for Review before being merged. Each bar is a day range; click to see which PRs are in it.</p>
+    <div class="chart-wrap">
+      <div class="chart-loading" id="pr-chart-loading">Loading…</div>
+      <canvas id="chart-pr" aria-label="PR time to merge histogram" style="display:none;"></canvas>
+    </div>
+    <p class="chart-hint">X axis: whole-day ranges (0–1d means merged in under a day, 1–2d means 1–2 days, …, 14+d for outliers). Click a bar for details.</p>
+  </div>
+
+  <!-- Linear dwell -->
+  <div class="panel">
+    <h2>Days in Linear workflow states</h2>
+    <p class="panel-sub">Total time your issues spent in each Linear state, summed across all tracked issues. States are sorted by total days. Click a bar to see which issues contributed.</p>
+    <div class="chart-wrap">
+      <div class="chart-loading" id="dwell-chart-loading">Loading…</div>
+      <canvas id="chart-dwell" aria-label="Linear dwell by state" style="display:none;"></canvas>
+    </div>
+    <p class="chart-hint">Time is approximate — tracked by state changes Sidecar has observed. Run <strong>Linear dwell backfill</strong> below to import full history from Linear.</p>
+  </div>
+
+  <!-- Data management -->
+  <div class="panel">
+    <h2>Sync &amp; backfill</h2>
+    <p class="muted">Use these controls to refresh or backfill your data. Under normal use you shouldn't need to run them often.</p>
+
+    <div style="display:flex; flex-direction:column; gap:1.25rem;">
+
+      <div>
+        <div class="sync-row">
+          <button type="button" id="full-sync-btn">Refresh GitHub data</button>
+          <span id="sync-msg" class="status-msg"></span>
+        </div>
+        <p class="muted" style="margin-top:0.4rem;">Same as hitting <strong>Refresh</strong> on the dashboard but forces a full GitHub PR cache update, bypassing the 2-minute cooldown. Run this if you merged a PR and want to see it here now.</p>
+      </div>
+
+      <div>
+        <div class="sync-row">
+          <button type="button" class="primary" id="backfill-linear-dwell-btn">Import Linear history</button>
+          <span id="backfill-linear-dwell-msg" class="status-msg"></span>
+        </div>
+        <p class="muted" style="margin-top:0.4rem;">Pulls your complete issue state history from Linear and rebuilds the dwell chart from the beginning. Run this <strong>once</strong> when you first set up Sidecar, or if the dwell chart looks wrong. It reads every state transition Linear has ever recorded for your issues.</p>
+      </div>
+
+      <div>
+        <div class="sync-row">
+          <button type="button" class="primary" id="backfill-btn">Import completed PR history</button>
+          <span id="backfill-msg" class="status-msg"></span>
+        </div>
+        <p class="muted" style="margin-top:0.4rem;">One-time import of GitHub PR data for issues you've already marked <strong>Completed</strong> in Sidecar. Run this once to populate the merge-time chart with your historical PRs. Issues with no personal status set are skipped.</p>
+      </div>
+
+    </div>
+  </div>
+
+  <div id="chart-drill-overlay" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="chart-drill-title">
+    <div class="modal-panel">
+      <h2 id="chart-drill-title"></h2>
+      <ul id="chart-drill-list"></ul>
+      <div class="modal-actions">
+        <button type="button" id="chart-drill-close">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function() {
+      const errEl = document.getElementById('load-err');
+      const statsBar = document.getElementById('stats-bar');
+      const drillOverlay = document.getElementById('chart-drill-overlay');
+      const drillTitle = document.getElementById('chart-drill-title');
+      const drillList = document.getElementById('chart-drill-list');
+      const fullSyncBtn = document.getElementById('full-sync-btn');
+      let chartDwell = null;
+      let chartPr = null;
+      let dwellIssuesByState = {};
+      let prBinRanges = [];
+      let mergedPrRows = [];
+      let currentPrRows = [];
+
+      function showErr(msg) {
+        errEl.textContent = msg || '';
+        errEl.classList.toggle('show', !!msg);
+      }
+
+      function openDrillModal(title, buildListFn) {
+        drillTitle.textContent = title;
+        drillList.innerHTML = '';
+        buildListFn(drillList);
+        drillOverlay.classList.add('open');
+      }
+
+      function closeDrillModal() {
+        drillOverlay.classList.remove('open');
+      }
+
+      document.getElementById('chart-drill-close').addEventListener('click', closeDrillModal);
+      drillOverlay.addEventListener('click', function(e) {
+        if (e.target === drillOverlay) closeDrillModal();
+      });
+
+      function cursorFromElements(evt, els) {
+        if (evt.native && evt.native.target) evt.native.target.style.cursor = els.length ? 'pointer' : 'default';
+      }
+
+      var PR_DAY_OVERFLOW = 14;
+
+      function buildIntegerDayPrHistogram(mergedRows) {
+        if (!mergedRows.length) {
+          return { labels: ['No merged PR data'], data: [0], ranges: [] };
+        }
+        const bucketCounts = {};
+        mergedRows.forEach(function(r) {
+          const d = r.open_days_non_draft;
+          if (d == null) return;
+          const k = d >= PR_DAY_OVERFLOW ? PR_DAY_OVERFLOW : Math.floor(d);
+          bucketCounts[k] = (bucketCounts[k] || 0) + 1;
+        });
+        const labels = [], data = [], ranges = [];
+        Object.keys(bucketCounts).map(Number).sort(function(a, b) { return a - b; }).forEach(function(k) {
+          if (k === PR_DAY_OVERFLOW) {
+            labels.push(PR_DAY_OVERFLOW + '+d');
+            ranges.push({ kind: 'overflow', lo: PR_DAY_OVERFLOW });
+          } else {
+            labels.push(k + '–' + (k + 1) + 'd');
+            ranges.push({ kind: 'range', lo: k, hi: k + 1 });
+          }
+          data.push(bucketCounts[k]);
+        });
+        return { labels: labels, data: data, ranges: ranges };
+      }
+
+      function prRowInDayBucket(r, br) {
+        const x = r.open_days_non_draft;
+        if (x == null || !br) return false;
+        if (br.kind === 'overflow') return x >= br.lo;
+        return x >= br.lo && x < br.hi;
+      }
+
+      function fmtDays(v) {
+        if (typeof v !== 'number' || isNaN(v)) return String(v);
+        return v % 1 === 0 ? v.toFixed(0) : v.toFixed(1);
+      }
+
+      function fmtWaitDays(v) {
+        if (typeof v !== 'number' || isNaN(v)) return String(v);
+        return v < 1 ? v.toFixed(1) : Math.floor(v).toFixed(0);
+      }
+
+      function relativeTime(isoStr) {
+        if (!isoStr) return null;
+        const then = new Date(isoStr);
+        const diffMs = Date.now() - then.getTime();
+        if (isNaN(diffMs)) return null;
+        const mins = Math.floor(diffMs / 60000);
+        if (mins < 2) return 'just now';
+        if (mins < 60) return mins + 'm ago';
+        const hrs = Math.floor(mins / 60);
+        if (hrs < 24) return hrs + 'h ago';
+        const days = Math.floor(hrs / 24);
+        return days + 'd ago';
+      }
+
+      function buildStatsBar(d) {
+        const syncRel = relativeTime(d.last_github_enrich_at);
+        const isStale = d.last_github_enrich_at && (Date.now() - new Date(d.last_github_enrich_at).getTime()) > 4 * 3600 * 1000;
+        let syncHtml = '';
+        if (syncRel) {
+          syncHtml = '<span class="sync-info' + (isStale ? ' stale' : '') + '">GitHub last synced: <strong>' + syncRel + '</strong>' + (isStale ? ' — consider refreshing' : '') + '</span>';
+        } else {
+          syncHtml = '<span class="sync-info stale">GitHub not yet synced — click <strong>Refresh GitHub data</strong> below</span>';
+        }
+        statsBar.innerHTML =
+          '<span>Linear issues tracked: <strong>' + (d.linear_issues_tracked || 0) + '</strong></span>' +
+          '<span>Merged PRs: <strong>' + (d.github_merged_count || 0) + '</strong></span>' +
+          (d.github_open_count ? '<span>Open PRs in cache: <strong>' + d.github_open_count + '</strong></span>' : '') +
+          (d.github_closed_unmerged_count ? '<span>Closed without merge: <strong>' + d.github_closed_unmerged_count + '</strong></span>' : '') +
+          syncHtml;
+      }
+
+      function buildOpenPrsList(allPrRows) {
+        const el = document.getElementById('open-prs-list');
+        const now = Date.now();
+        const open = allPrRows
+          .filter(function(r) { return r.outcome === 'open'; })
+          .map(function(r) {
+            // ready_at is set when a PR was marked Ready for Review (or created as non-draft).
+            // Fall back to created_at for non-draft PRs whose ready_at wasn't captured yet.
+            const since = r.ready_at || (!r.draft ? r.created_at : null);
+            const waitDays = since ? (now - new Date(since).getTime()) / 86400000 : null;
+            return { r: r, waitDays: waitDays };
+          })
+          .sort(function(a, b) { return (b.waitDays || 0) - (a.waitDays || 0); });
+
+        el.innerHTML = '';
+        if (!open.length) {
+          el.innerHTML = '<li><span class="empty-note">No open PRs in cache. Hit <strong>Refresh GitHub data</strong> to update.</span></li>';
+          return;
+        }
+        open.forEach(function(item) {
+          const r = item.r;
+          const li = document.createElement('li');
+          const isDraft = !!r.draft;
+          const ageClass = isDraft ? 'pr-age fast' : (item.waitDays != null && item.waitDays >= 2 ? 'pr-age' : 'pr-age fast');
+          const ageLabel = isDraft
+            ? 'Draft'
+            : (item.waitDays != null ? fmtWaitDays(item.waitDays) + 'd waiting' : 'age unknown');
+          const titleText = r.title || (r.repo + ' #' + r.number);
+          const idText = r.linear_identifier ? r.linear_identifier + ' · ' : '';
+          li.innerHTML =
+            '<span class="' + ageClass + '">' + ageLabel + '</span>' +
+            (r.html_url
+              ? '<a href="' + r.html_url + '" target="_blank" rel="noopener noreferrer">' + titleText + '</a>'
+              : '<span>' + titleText + '</span>') +
+            '<span class="pr-id">' + idText + r.repo + ' #' + r.number + '</span>';
+          el.appendChild(li);
+        });
+      }
+
+      function appendPrListItem(ul, r) {
+        const li = document.createElement('li');
+        const titleText = r.title || (r.repo + ' #' + r.number);
+        const sub = [r.linear_identifier, r.repo + ' #' + r.number, r.open_days_non_draft != null ? fmtDays(r.open_days_non_draft) + 'd' : null]
+          .filter(Boolean).join(' · ');
+        li.innerHTML =
+          '<div class="pr-meta">' +
+          (r.html_url
+            ? '<a class="pr-title" href="' + r.html_url + '" target="_blank" rel="noopener noreferrer">' + titleText + '</a>'
+            : '<span class="pr-title">' + titleText + '</span>') +
+          '</div>' +
+          '<div class="pr-sub">' + sub + '</div>';
+        ul.appendChild(li);
+      }
+
+      function loadMetrics() {
+        document.getElementById('dwell-chart-loading').style.display = 'flex';
+        document.getElementById('pr-chart-loading').style.display = 'flex';
+        document.getElementById('chart-dwell').style.display = 'none';
+        document.getElementById('chart-pr').style.display = 'none';
+
+        fetch('/api/metrics')
+          .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, j: j }; }); })
+          .then(function(res) {
+            if (!res.ok) { showErr(res.j.error || 'Failed to load metrics'); return; }
+            showErr('');
+            const d = res.j;
+            dwellIssuesByState = d.linear_dwell_issues_by_state || {};
+            mergedPrRows = (d.github_prs || []).filter(function(r) {
+              return r.outcome === 'merged' && r.open_days_non_draft != null;
+            });
+
+            buildStatsBar(d);
+            buildOpenPrsList(d.github_prs || []);
+
+            // --- Dwell chart (sorted by value descending) ---
+            const dwellRaw = d.linear_dwell_days_by_state || {};
+            const dwellSorted = Object.entries(dwellRaw).sort(function(a, b) { return b[1] - a[1]; });
+            const dwellLabels = dwellSorted.map(function(e) { return e[0]; });
+            const dwellVals = dwellSorted.map(function(e) { return e[1]; });
+            const dwellPlaceholder = !dwellLabels.length;
+
+            document.getElementById('dwell-chart-loading').style.display = 'none';
+            document.getElementById('chart-dwell').style.display = 'block';
+            const ctx1 = document.getElementById('chart-dwell').getContext('2d');
+            if (chartDwell) chartDwell.destroy();
+            chartDwell = new Chart(ctx1, {
+              type: 'bar',
+              data: {
+                labels: dwellPlaceholder ? ['No data — run Import Linear history below'] : dwellLabels,
+                datasets: [{ label: 'Days', data: dwellPlaceholder ? [0] : dwellVals,
+                  backgroundColor: 'rgba(88, 166, 255, 0.5)', borderColor: 'rgba(88, 166, 255, 1)', borderWidth: 1 }]
+              },
+              options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: {
+                  legend: { display: false },
+                  tooltip: { callbacks: { label: function(ctx) { return 'Days: ' + fmtDays(ctx.raw); } } }
+                },
+                onHover: function(evt, els) { cursorFromElements(evt, els); },
+                onClick: function(evt, els) {
+                  if (!els.length || dwellPlaceholder) return;
+                  const stateName = chartDwell.data.labels[els[0].index];
+                  const ids = dwellIssuesByState[stateName] || [];
+                  openDrillModal('Issues with time in "' + stateName + '"', function(ul) {
+                    if (!ids.length) {
+                      const li = document.createElement('li'); li.textContent = 'No identifiers recorded (older snapshots may lack them).'; ul.appendChild(li); return;
+                    }
+                    ids.forEach(function(id) { const li = document.createElement('li'); li.textContent = id; ul.appendChild(li); });
+                  });
+                },
+                scales: {
+                  y: { beginAtZero: true, ticks: { color: '#8b949e', callback: function(v) { return fmtDays(v); } }, grid: { color: '#2d3a4d' } },
+                  x: { ticks: { color: '#8b949e' }, grid: { color: '#2d3a4d' } }
+                }
+              }
+            });
+
+            // --- PR merge-time histogram ---
+            document.getElementById('pr-chart-loading').style.display = 'none';
+            document.getElementById('chart-pr').style.display = 'block';
+            renderPrHistogram(getFilteredMergedPrRows());
+          })
+          .catch(function() { showErr('Network error loading metrics'); });
+      }
+
+      function getFilteredMergedPrRows() {
+        const days = parseInt(document.getElementById('pr-range-select').value, 10);
+        if (!days) return mergedPrRows;
+        const cutoff = Date.now() - days * 86400000;
+        return mergedPrRows.filter(function(r) {
+          if (!r.merged_at) return false;
+          return new Date(r.merged_at).getTime() >= cutoff;
+        });
+      }
+
+      function renderPrHistogram(rows) {
+        currentPrRows = rows;
+        const total = mergedPrRows.length;
+        const shown = rows.length;
+        const countEl = document.getElementById('pr-range-count');
+        countEl.textContent = shown === total
+          ? shown + ' merged PR' + (shown !== 1 ? 's' : '')
+          : shown + ' of ' + total + ' merged PR' + (total !== 1 ? 's' : '');
+
+        const hist = buildIntegerDayPrHistogram(rows);
+        prBinRanges = hist.ranges;
+        const ctx2 = document.getElementById('chart-pr').getContext('2d');
+        if (chartPr) chartPr.destroy();
+        chartPr = new Chart(ctx2, {
+          type: 'bar',
+          data: {
+            labels: hist.labels,
+            datasets: [{ label: 'Count', data: hist.data,
+              backgroundColor: 'rgba(63, 185, 80, 0.45)', borderColor: 'rgba(63, 185, 80, 1)', borderWidth: 1 }]
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false },
+              tooltip: { callbacks: { label: function(ctx) { return 'PRs: ' + ctx.raw; } } }
+            },
+            onHover: function(evt, els) { cursorFromElements(evt, els); },
+            onClick: function(evt, els) {
+              if (!els.length || !prBinRanges.length) return;
+              const br = prBinRanges[els[0].index];
+              if (!br) return;
+              const inBin = currentPrRows.filter(function(r) { return prRowInDayBucket(r, br); })
+                .sort(function(a, b) { return (b.open_days_non_draft || 0) - (a.open_days_non_draft || 0); });
+              openDrillModal('Merged PRs: ' + (hist.labels[els[0].index] || ''), function(ul) {
+                if (!inBin.length) { const li = document.createElement('li'); li.textContent = 'No PRs in this bucket.'; ul.appendChild(li); return; }
+                inBin.forEach(function(r) { appendPrListItem(ul, r); });
+              });
+            },
+            scales: {
+              y: { beginAtZero: true, ticks: { stepSize: 1, color: '#8b949e' }, grid: { color: '#2d3a4d' } },
+              x: { ticks: { color: '#8b949e', maxRotation: 45 }, grid: { color: '#2d3a4d' } }
+            }
+          }
+        });
+      }
+
+      document.getElementById('pr-range-select').addEventListener('change', function() {
+        renderPrHistogram(getFilteredMergedPrRows());
+      });
+
+      function wireButton(btnId, msgId, fetchFn, onSuccess) {
+        const btn = document.getElementById(btnId);
+        const msg = document.getElementById(msgId);
+        btn.addEventListener('click', function() {
+          msg.textContent = 'Running…';
+          msg.className = 'status-msg';
+          btn.disabled = true;
+          fetchFn()
+            .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, j: j }; }); })
+            .then(function(res) {
+              if (!res.ok) { msg.textContent = res.j.error || 'Failed'; msg.className = 'status-msg err'; return; }
+              msg.className = 'status-msg ok';
+              onSuccess(res.j, msg);
+              loadMetrics();
+            })
+            .catch(function() { msg.textContent = 'Network error'; msg.className = 'status-msg err'; })
+            .finally(function() { btn.disabled = false; });
+        });
+      }
+
+      wireButton('full-sync-btn', 'sync-msg',
+        function() { return fetch('/api/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ force_github: true }) }); },
+        function(j, msg) { msg.textContent = 'Done — ' + (j.refresh_detail && j.refresh_detail.github_pr_updates != null ? j.refresh_detail.github_pr_updates + ' PR records updated.' : 'refreshed.'); }
+      );
+
+      wireButton('backfill-linear-dwell-btn', 'backfill-linear-dwell-msg',
+        function() { return fetch('/api/metrics/backfill-linear-dwell', { method: 'POST' }); },
+        function(j, msg) {
+          const br = j.from_completed_overlay != null
+            ? ' (from completed: ' + j.from_completed_overlay + ', assigned: ' + (j.from_assigned || 0) + ', store: ' + (j.from_metrics_store || 0) + ')'
+            : '';
+          msg.textContent = 'Imported ' + ((j.processed && j.processed.length) || 0) + ' issue(s)' + br + '. Transition rows: ' + (j.transition_rows_total || 0) + '.';
+        }
+      );
+
+      wireButton('backfill-btn', 'backfill-msg',
+        function() { return fetch('/api/metrics/backfill-github', { method: 'POST' }); },
+        function(j, msg) { msg.textContent = 'Processed ' + ((j.processed && j.processed.length) || 0) + ' issue(s). Total PRs cached: ' + (j.prs_total || 0) + '.'; }
+      );
+
+      loadMetrics();
+    })();
+  </script>
+</body>
+</html>
