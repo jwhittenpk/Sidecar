@@ -51,9 +51,10 @@ def _raw_issue(
 
 @pytest.fixture
 def mock_linear_fetch():
-    """Mock _fetch_all_assigned_issues to return one raw Linear node (no real API calls)."""
-    with patch.object(app_module, "_fetch_all_assigned_issues", return_value=[_sample_raw_linear_node()]) as m:
-        yield m
+    """Mock _fetch_all_assigned_issues and get_linear_token so no real API calls are made."""
+    with patch.object(app_module, "get_linear_token", return_value="test-token"):
+        with patch.object(app_module, "_fetch_all_assigned_issues", return_value=[_sample_raw_linear_node()]) as m:
+            yield m
 
 
 def test_get_landing_returns_200():

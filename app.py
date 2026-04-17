@@ -7,6 +7,7 @@ import copy
 import json
 import logging
 import os
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -401,8 +402,55 @@ def _normalize_issue(node):
     }
 
 
+_metrics_refresh_lock = threading.Lock()
+
+
+def _bg_refresh_linear_snapshots():
+    """Background sub-thread: fetch fresh Linear data and record snapshots."""
+    try:
+        token = get_linear_token()
+        raw = _fetch_all_assigned_issues(token)
+        fresh = [_normalize_issue(n) for n in raw]
+        metrics_module.record_linear_snapshots(fresh, path=METRICS_STORE_PATH)
+        logging.info("Background Linear snapshot: %d issues recorded", len(fresh))
+    except Exception as e:
+        logging.warning("Background Linear snapshot failed: %s", e)
+
+
+def _bg_refresh_github_prs(gh_issues, site, gh_token):
+    """Background sub-thread: enrich GitHub PRs."""
+    try:
+        metrics_module.enrich_github_prs_for_issues(
+            gh_issues, site, gh_token,
+            path=METRICS_STORE_PATH,
+            refresh_pr_meta=False,
+        )
+    except (OSError, requests.RequestException) as e:
+        logging.warning("Background GitHub enrich failed: %s", e)
+
+
+def _run_background_metrics_refresh(gh_issues, site, gh_token):
+    """Fetch fresh Linear snapshots and enrich GitHub PRs concurrently. Skips if already running."""
+    if not _metrics_refresh_lock.acquire(blocking=False):
+        logging.info("Background metrics refresh already running, skipping")
+        return
+    try:
+        t_linear = threading.Thread(target=_bg_refresh_linear_snapshots, daemon=True)
+        t_github = threading.Thread(
+            target=_bg_refresh_github_prs,
+            args=(gh_issues, site, gh_token),
+            daemon=True,
+        )
+        t_linear.start()
+        t_github.start()
+        t_linear.join()
+        t_github.join()
+    finally:
+        _metrics_refresh_lock.release()
+
+
 def _record_metrics_after_linear_fetch(linear_normalized, *, force_github: bool = False):
-    """Append Linear snapshots; optionally refresh GitHub PR cache. Returns status dict for the UI."""
+    """Record Linear snapshots; kick off periodic background refresh of both Linear and GitHub."""
     detail: dict = {"metrics_snapshot": "ok"}
     try:
         metrics_module.record_linear_snapshots(linear_normalized, path=METRICS_STORE_PATH)
@@ -419,28 +467,39 @@ def _record_metrics_after_linear_fetch(linear_normalized, *, force_github: bool 
         detail["github_enrich"] = "skipped_no_token"
         return detail
 
-    gate = metrics_module.github_enrich_gate(METRICS_STORE_PATH, force=force_github)
+    site = get_site_settings()
+    cd_minutes = (site.get(metrics_module.SITE_METRICS_KEY) or {}).get("github_enrich_cooldown_minutes")
+    cd_seconds = int(cd_minutes) * 60 if isinstance(cd_minutes, (int, float)) else None
+    gate = metrics_module.github_enrich_gate(METRICS_STORE_PATH, force=force_github, cooldown_seconds=cd_seconds)
     detail["github_cooldown_seconds"] = gate["cooldown_seconds"]
     if not gate["allowed"]:
         detail["github_enrich"] = "skipped_cooldown"
         detail["github_seconds_until_next"] = gate["seconds_until_next"]
         return detail
 
-    try:
-        site = get_site_settings()
-        n = metrics_module.enrich_github_prs_for_issues(
-            gh_issues,
-            site,
-            gh_token,
-            path=METRICS_STORE_PATH,
-            refresh_pr_meta=force_github,
+    if force_github:
+        # Explicit user request from metrics page — run GitHub synchronously so response reflects result
+        try:
+            n = metrics_module.enrich_github_prs_for_issues(
+                gh_issues, site, gh_token,
+                path=METRICS_STORE_PATH,
+                refresh_pr_meta=True,
+            )
+            detail["github_enrich"] = "completed"
+            detail["github_pr_updates"] = n
+        except (OSError, requests.RequestException) as e:
+            logging.warning("GitHub metrics enrich failed: %s", e)
+            detail["github_enrich"] = "error"
+            detail["github_error"] = str(e)
+    else:
+        # Periodic background refresh: Linear + GitHub run concurrently, dashboard loads instantly
+        t = threading.Thread(
+            target=_run_background_metrics_refresh,
+            args=(gh_issues, site, gh_token),
+            daemon=True,
         )
-        detail["github_enrich"] = "completed"
-        detail["github_pr_updates"] = n
-    except (OSError, requests.RequestException) as e:
-        logging.warning("GitHub metrics enrich failed: %s", e)
-        detail["github_enrich"] = "error"
-        detail["github_error"] = str(e)
+        t.start()
+        detail["github_enrich"] = "background"
     return detail
 
 
@@ -546,6 +605,13 @@ def write_site_settings(updates):
             m["cycle_start_states"] = [str(x).strip() for x in m_u["cycle_start_states"] if str(x).strip()]
         if isinstance(m_u.get("terminal_state_name"), str):
             m["terminal_state_name"] = m_u["terminal_state_name"].strip()
+        raw_cd = m_u.get("github_enrich_cooldown_minutes")
+        if raw_cd is not None:
+            try:
+                v = int(raw_cd)
+                m["github_enrich_cooldown_minutes"] = max(0, v)
+            except (ValueError, TypeError):
+                pass
     settings[metrics_module.SETTINGS_SITE_KEY] = merged
     write_settings(settings)
     return merged

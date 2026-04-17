@@ -44,7 +44,7 @@ BACKFILL_PERSONAL_STATUS = "Completed"
 def _github_enrich_cooldown_seconds() -> int:
     """Min seconds between full GitHub enrich runs on refresh (0 = always run)."""
     try:
-        v = int(os.getenv("SIDECAR_GITHUB_REFRESH_COOLDOWN_SEC", "120"))
+        v = int(os.getenv("SIDECAR_GITHUB_REFRESH_COOLDOWN_SEC", "1800"))
     except ValueError:
         v = 120
     return max(0, v)
@@ -68,12 +68,18 @@ def _github_pull_list_max_pages() -> int:
     return max(1, min(v, 30))
 
 
-def github_enrich_gate(path: Optional[Path] = None, *, force: bool = False) -> dict[str, Any]:
+def github_enrich_gate(
+    path: Optional[Path] = None,
+    *,
+    force: bool = False,
+    cooldown_seconds: Optional[int] = None,
+) -> dict[str, Any]:
     """
     Whether refresh may run GitHub list+PR metadata sync.
+    cooldown_seconds overrides the env-var default when provided (e.g. from site settings).
     Returns allowed, cooldown_seconds, seconds_until_next (if blocked).
     """
-    cd = _github_enrich_cooldown_seconds()
+    cd = cooldown_seconds if cooldown_seconds is not None else _github_enrich_cooldown_seconds()
     if force or cd == 0:
         return {"allowed": True, "cooldown_seconds": cd, "seconds_until_next": None}
     store = read_metrics_store(path)
@@ -133,6 +139,7 @@ def default_site_metrics() -> dict[str, Any]:
     return {
         "cycle_start_states": ["In Progress"],
         "terminal_state_name": "Done",
+        "github_enrich_cooldown_minutes": 240,
     }
 
 
@@ -154,6 +161,9 @@ def merge_site_defaults(site: Optional[dict]) -> dict[str, Any]:
                 mt["cycle_start_states"] = [str(x).strip() for x in m["cycle_start_states"] if str(x).strip()]
             if isinstance(m.get("terminal_state_name"), str) and m["terminal_state_name"].strip():
                 mt["terminal_state_name"] = m["terminal_state_name"].strip()
+            raw_cd = m.get("github_enrich_cooldown_minutes")
+            if isinstance(raw_cd, (int, float)) and raw_cd >= 0:
+                mt["github_enrich_cooldown_minutes"] = int(raw_cd)
     return {SITE_GITHUB_KEY: gh, SITE_METRICS_KEY: mt}
 
 
