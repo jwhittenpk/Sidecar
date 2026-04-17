@@ -1,3 +1,8 @@
+## v0.2.6
+
+- chore: clean up duplicate CHANGELOG entry for v0.2.5
+- chore: update CHANGELOG and VERSION for v0.2.5
+
 ## v0.2.5
 
 - Merge pull request #14 from jwhittenpk/feature/sidecar-13
