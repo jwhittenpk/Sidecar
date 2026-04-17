@@ -1,4 +1,4 @@
-## v0.2.6
+## v0.2.7
 
 - feat: background metrics refresh — Linear snapshots and GitHub enrichment run concurrently on a shared timer
 - feat: GitHub enrichment cooldown configurable in Settings (default 4 hours)
