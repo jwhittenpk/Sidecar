@@ -1,14 +1,7 @@
 ## v0.2.5
 
 - Merge pull request #14 from jwhittenpk/feature/sidecar-13
-- chore: update CHANGELOG and VERSION for v0.2.5
-- fix: XSS escape PR titles/URLs in metrics UI, ignore .idea/, clean up coalesce
-- sidecar-13: feat: metrics dashboard — Linear dwell time and GitHub PR tracking
-- chore: update CHANGELOG and VERSION for v0.2.4
-
-## v0.2.5
-
-- sidecar-13: feat: metrics dashboard — Linear dwell time and GitHub PR tracking
+- feat: metrics dashboard — Linear dwell time and GitHub PR tracking
 - feat: open PR aging list sorted by time in Ready for Review
 - feat: time-to-merge histogram with date range filter (default last year)
 - feat: Linear workflow state dwell chart with backfill from issue history
