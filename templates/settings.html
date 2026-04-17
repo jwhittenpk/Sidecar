@@ -36,7 +36,7 @@
     }
     .panel h2 { font-size: 1rem; margin: 0 0 1rem; }
     label { display: block; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.35rem; }
-    input[type="text"], textarea {
+    input[type="text"], input[type="number"], textarea {
       width: 100%;
       background: var(--bg);
       color: var(--text);
@@ -87,6 +87,9 @@
 
     <label for="terminal-state">Terminal Linear state name for backfill</label>
     <input type="text" id="terminal-state" placeholder="Done">
+
+    <label for="gh-cooldown">Background GitHub scan interval (minutes)</label>
+    <input type="number" id="gh-cooldown" min="0" step="1" placeholder="240" style="max-width:10rem">
   </div>
 
   <button type="button" id="save-btn">Save settings</button>
@@ -106,6 +109,7 @@
             var m = site.metrics || {};
             document.getElementById('cycle-starts').value = (m.cycle_start_states || []).join(', ');
             document.getElementById('terminal-state').value = m.terminal_state_name || 'Done';
+            document.getElementById('gh-cooldown').value = m.github_enrich_cooldown_minutes != null ? m.github_enrich_cooldown_minutes : 240;
           })
           .catch(function() {
             msg.textContent = 'Failed to load settings';
@@ -129,7 +133,8 @@
           },
           metrics: {
             cycle_start_states: starts.length ? starts : ['In Progress'],
-            terminal_state_name: document.getElementById('terminal-state').value.trim() || 'Done'
+            terminal_state_name: document.getElementById('terminal-state').value.trim() || 'Done',
+            github_enrich_cooldown_minutes: parseInt(document.getElementById('gh-cooldown').value, 10) || 240
           }
         };
         fetch('/api/settings/site', {

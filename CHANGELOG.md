@@ -1,3 +1,10 @@
+## v0.2.6
+
+- feat: background metrics refresh — Linear snapshots and GitHub enrichment run concurrently on a shared timer
+- feat: GitHub enrichment cooldown configurable in Settings (default 4 hours)
+- perf: dashboard loads instantly; periodic refresh no longer blocks page render
+- fix: raise default GitHub enrichment cooldown from 2 min to 4 hours
+
 ## v0.2.5
 
 - Merge pull request #14 from jwhittenpk/feature/sidecar-13
