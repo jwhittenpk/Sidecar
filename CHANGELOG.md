@@ -1,3 +1,24 @@
+## v0.2.5
+
+- sidecar-13: feat: metrics dashboard — Linear dwell time and GitHub PR tracking
+- feat: open PR aging list sorted by time in Ready for Review
+- feat: time-to-merge histogram with date range filter (default last year)
+- feat: Linear workflow state dwell chart with backfill from issue history
+- feat: /settings page for GitHub org/repo/login configuration
+- feat: terminal progress logging for GitHub sync and backfill operations
+- fix: PR discovery substring match (PK-15 no longer claims PK-1516 PRs)
+- fix: draft PR cycle — ready_at correctly resets after convert_to_draft
+- fix: open PR age falls back to created_at for non-draft PRs with no ready_at
+- fix: XSS — escape PR titles, repo names, and identifiers in metrics UI
+- refactor: reorganise file layout — config/ for settings, data/ for overlay and metrics store
+- chore: add JetBrains .idea/ entries to .gitignore
+
+## v0.2.4
+
+- Merge pull request #13 from jwhittenpk/feature/sidecar-12
+- Sidecar-12: feat: add new personal statuses, automatically complete personal statuses on Linear completion
+- chore: update CHANGELOG and VERSION for v0.2.3
+
 ## v0.2.3
 
 - Merge pull request #12 from jwhittenpk/feature/sidecar-11

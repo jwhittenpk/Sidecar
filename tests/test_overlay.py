@@ -31,7 +31,7 @@ def test_write_entry_creates_file(temp_overlay_path):
     assert "last_updated" in data["LIN-1"]
 
 
-@pytest.mark.parametrize("status", ["Testing", "Pair Testing", "Waiting on Testing", "Completed", "Notable"])
+@pytest.mark.parametrize("status", ["Testing", "Pair Testing", "Waiting on Testing", "Completed", "Canceled", "Meeting Scheduled", "Notable"])
 def test_write_entry_saves_new_personal_statuses(temp_overlay_path, status):
     """Personal status values including Completed and Notable can be saved without error."""
     app_module.write_overlay_entry("LIN-1", {"personal_status": status})

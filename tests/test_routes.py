@@ -585,7 +585,7 @@ def test_get_api_issues_filter_no_matches_returns_200_empty_list(mock_linear_fet
 
 
 def test_get_api_personal_status_options_includes_new_statuses_in_order():
-    """GET /api/personal-status-options returns all statuses including Completed and Notable in correct display order."""
+    """GET /api/personal-status-options returns all statuses including Completed, Canceled, Meeting Scheduled, Notable in correct display order."""
     client = app_module.app.test_client()
     resp = client.get("/api/personal-status-options")
     assert resp.status_code == 200
@@ -594,17 +594,21 @@ def test_get_api_personal_status_options_includes_new_statuses_in_order():
     assert "Testing" in opts
     assert "Pair Testing" in opts
     assert "Waiting on Testing" in opts
+    assert "Meeting Scheduled" in opts
     assert "Completed" in opts
+    assert "Canceled" in opts
     assert "Notable" in opts
     idx_in_progress = opts.index("In Progress")
     idx_testing = opts.index("Testing")
     idx_ready = opts.index("Ready to Close")
     idx_completed = opts.index("Completed")
+    idx_canceled = opts.index("Canceled")
     idx_notable = opts.index("Notable")
     assert idx_testing > idx_in_progress
     assert idx_ready > idx_testing
     assert idx_completed > idx_ready
-    assert idx_notable > idx_completed
+    assert idx_canceled > idx_completed
+    assert idx_notable > idx_canceled
 
 
 def test_post_api_overlay_invalid_personal_status_returns_400(temp_overlay_path, mock_linear_fetch):
