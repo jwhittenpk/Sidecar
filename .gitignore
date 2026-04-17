@@ -127,12 +127,19 @@ celerybeat.pid
 # SageMath parsed files
 *.sage.py
 
-# Sidecar local overlay data (never commit)
+# Sidecar local data (never commit — personal notes, priorities, PR cache)
+config/settings.json
+data/
+# Legacy root locations (pre-reorganization, kept for safety)
 overlay.json
 overlay.old
 settings.json
 inprogress.json
 completed.json
+metrics_store.json
+
+# Optional local secrets directory (never commit)
+.secrets/
 
 # Environments
 .env
@@ -168,11 +175,7 @@ dmypy.json
 cython_debug/
 
 # PyCharm
-#  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
-#  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
-#  and can be added to the global gitignore or merged into this file.  For a more nuclear
-#  option (not recommended) you can uncomment the following to ignore the entire idea folder.
-#.idea/
+.idea/
 
 # Ruff stuff:
 .ruff_cache/

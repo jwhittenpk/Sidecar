@@ -4,6 +4,17 @@ import json
 import pytest
 
 import app as app_module
+import metrics as metrics_module
+
+
+@pytest.fixture(autouse=True)
+def reset_app_issues_cache():
+    """Clear in-memory Linear cache between tests (avoids order-dependent failures)."""
+    app_module._issues_cache = None
+    app_module._last_fetched = None
+    yield
+    app_module._issues_cache = None
+    app_module._last_fetched = None
 
 
 def _default_settings():
@@ -64,3 +75,11 @@ def temp_overlay_path_no_files(tmp_path):
     app_module.COMPLETED_PATH = orig[2]
     app_module.OVERLAY_LEGACY_PATH = orig[3]
     app_module.OVERLAY_OLD_PATH = orig[4]
+
+
+@pytest.fixture(autouse=True)
+def isolate_metrics_store(tmp_path, monkeypatch):
+    """Avoid writing metrics_store.json into the repo during tests."""
+    mp = tmp_path / "metrics_store.json"
+    monkeypatch.setattr(app_module, "METRICS_STORE_PATH", mp)
+    monkeypatch.setattr(metrics_module, "METRICS_STORE_PATH", mp)

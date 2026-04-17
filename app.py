@@ -14,23 +14,36 @@ import requests
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request
 
+import metrics as metrics_module
+
 # Load .env from app directory so cwd doesn't matter (e.g. python app.py vs python -m app)
 _env_path = Path(__file__).parent / ".env"
 load_dotenv(_env_path)
 load_dotenv()  # also allow cwd .env to override
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%H:%M:%S",
+)
+
 app = Flask(__name__)
 
 LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql"
 _app_dir = Path(__file__).parent
-SETTINGS_PATH = _app_dir / "settings.json"
-INPROGRESS_PATH = _app_dir / "inprogress.json"
-COMPLETED_PATH = _app_dir / "completed.json"
-OVERLAY_LEGACY_PATH = _app_dir / "overlay.json"
-OVERLAY_OLD_PATH = _app_dir / "overlay.old"
-# Legacy single-file path for tests that patch before migration
-OVERLAY_PATH = _app_dir / "overlay.json"
+_config_dir = _app_dir / "config"
+_data_dir = _app_dir / "data"
+
+SETTINGS_PATH = _config_dir / "settings.json"
+INPROGRESS_PATH = _data_dir / "inprogress.json"
+COMPLETED_PATH = _data_dir / "completed.json"
+OVERLAY_LEGACY_PATH = _data_dir / "overlay.json"
+OVERLAY_OLD_PATH = _data_dir / "overlay.old"
+OVERLAY_PATH = _data_dir / "overlay.json"
+METRICS_STORE_PATH = _data_dir / "metrics_store.json"
 PAGE_SIZE = 50
+
+metrics_module.METRICS_STORE_PATH = METRICS_STORE_PATH
 
 # In-memory cache: list of merged issue dicts, and when we last fetched from Linear.
 _issues_cache = None
@@ -92,9 +105,32 @@ _REGISTRY_IDS = frozenset(c["id"] for c in COLUMN_REGISTRY)
 RESERVED_KEYS = (COLUMN_VISIBILITY_KEY, COLUMN_PREFERENCES_KEY)
 
 
+def _migrate_files_to_subdirs():
+    """Move data files from the old root layout into config/ and data/ subdirectories.
+    Idempotent — skips any file whose destination already exists.
+    Must run before _migrate_overlay_to_split so that function finds files in the right place."""
+    _config_dir.mkdir(exist_ok=True)
+    _data_dir.mkdir(exist_ok=True)
+
+    moves = [
+        (_app_dir / "settings.json",      SETTINGS_PATH),
+        (_app_dir / "inprogress.json",     INPROGRESS_PATH),
+        (_app_dir / "completed.json",      COMPLETED_PATH),
+        (_app_dir / "metrics_store.json",  METRICS_STORE_PATH),
+        (_app_dir / "overlay.json",        OVERLAY_LEGACY_PATH),
+        (_app_dir / "overlay.old",         OVERLAY_OLD_PATH),
+    ]
+    for src, dst in moves:
+        if src.exists() and not dst.exists():
+            src.rename(dst)
+            logging.info("Migrated %s → %s", src.name, dst)
+
+
 def _migrate_overlay_to_split():
     """One-time migration: overlay.json -> settings.json + inprogress.json + completed.json; rename overlay.json to overlay.old.
     Idempotent: only runs when SETTINGS_PATH does not exist."""
+    _config_dir.mkdir(exist_ok=True)
+    _data_dir.mkdir(exist_ok=True)
     if SETTINGS_PATH.exists():
         return
     if OVERLAY_LEGACY_PATH.exists():
@@ -140,7 +176,8 @@ def _migrate_overlay_to_split():
 
 
 def ensure_migrated():
-    """Ensure split overlay layout exists; run one-time migration if needed."""
+    """Ensure correct directory layout exists; run one-time migrations if needed."""
+    _migrate_files_to_subdirs()
     _migrate_overlay_to_split()
 
 
@@ -267,11 +304,13 @@ def _fetch_issues_page(token, after_cursor=None):
         nodes {
           id
           identifier
+          createdAt
           title
           url
           priority
           updatedAt
-          state { name, type }
+          description
+          state { id name type }
           team { name }
           cycle { id name number startsAt endsAt }
           labels { nodes { id name color } }
@@ -287,8 +326,15 @@ def _fetch_issues_page(token, after_cursor=None):
     return data["issues"]
 
 
-def _fetch_all_assigned_issues(token):
-    """Fetch all issues assigned to me (all states). Filter to active + completed in last 6 months in Python."""
+def _fetch_all_assigned_issues(token, *, for_backfill: bool = False):
+    """Fetch all issues assigned to me (all states), paginated.
+
+    Default (for_backfill=False): same as dashboard — active issues plus completed/canceled
+    updated in the last 6 months.
+
+    for_backfill=True: include every issue Linear returns for assignee isMe (no date cutoff),
+    so older completed work still assigned to you is included for dwell history import.
+    """
     six_months_ago = datetime.now(timezone.utc) - timedelta(days=180)
     all_nodes = []
     after = None
@@ -296,6 +342,9 @@ def _fetch_all_assigned_issues(token):
         page = _fetch_issues_page(token, after_cursor=after)  # no viewer_id: filter uses isMe in query
         nodes = page["nodes"]
         for n in nodes:
+            if for_backfill:
+                all_nodes.append(n)
+                continue
             state_type = (n.get("state") or {}).get("type")
             is_completed = state_type in ("completed", "canceled")
             updated_at = n.get("updatedAt")
@@ -338,7 +387,10 @@ def _normalize_issue(node):
         "id": node["id"],
         "identifier": node.get("identifier", ""),
         "title": node.get("title", ""),
+        "description": node.get("description", ""),
         "linear_status": state.get("name", ""),
+        "linear_state_id": state.get("id", ""),
+        "linear_state_type": state.get("type", ""),
         "linear_priority": node.get("priority", 0),
         "url": node.get("url", ""),
         "team_name": team.get("name", ""),
@@ -347,6 +399,49 @@ def _normalize_issue(node):
         "cycle": cycle,
         "labels": labels,
     }
+
+
+def _record_metrics_after_linear_fetch(linear_normalized, *, force_github: bool = False):
+    """Append Linear snapshots; optionally refresh GitHub PR cache. Returns status dict for the UI."""
+    detail: dict = {"metrics_snapshot": "ok"}
+    try:
+        metrics_module.record_linear_snapshots(linear_normalized, path=METRICS_STORE_PATH)
+    except (OSError, TypeError) as e:
+        logging.warning("metrics snapshot failed: %s", e)
+        detail["metrics_snapshot"] = "error"
+    gh_issues = [
+        {"identifier": li.get("identifier") or "", "description": li.get("description") or ""}
+        for li in linear_normalized
+    ]
+    try:
+        gh_token = metrics_module.get_github_token()
+    except ValueError:
+        detail["github_enrich"] = "skipped_no_token"
+        return detail
+
+    gate = metrics_module.github_enrich_gate(METRICS_STORE_PATH, force=force_github)
+    detail["github_cooldown_seconds"] = gate["cooldown_seconds"]
+    if not gate["allowed"]:
+        detail["github_enrich"] = "skipped_cooldown"
+        detail["github_seconds_until_next"] = gate["seconds_until_next"]
+        return detail
+
+    try:
+        site = get_site_settings()
+        n = metrics_module.enrich_github_prs_for_issues(
+            gh_issues,
+            site,
+            gh_token,
+            path=METRICS_STORE_PATH,
+            refresh_pr_meta=force_github,
+        )
+        detail["github_enrich"] = "completed"
+        detail["github_pr_updates"] = n
+    except (OSError, requests.RequestException) as e:
+        logging.warning("GitHub metrics enrich failed: %s", e)
+        detail["github_enrich"] = "error"
+        detail["github_error"] = str(e)
+    return detail
 
 
 def fetch_linear_issues():
@@ -415,6 +510,45 @@ def write_column_preferences(order_list, visibility_dict):
     settings = read_settings()
     settings[COLUMN_PREFERENCES_KEY] = {"order": list(order_list), "visibility": dict(visibility_dict)}
     write_settings(settings)
+
+
+def get_site_settings():
+    """Return merged site config (GitHub org/repos/login, metrics cycle labels) from settings.json."""
+    ensure_migrated()
+    settings = read_settings()
+    raw = settings.get(metrics_module.SETTINGS_SITE_KEY)
+    return metrics_module.merge_site_defaults(raw if isinstance(raw, dict) else None)
+
+
+def write_site_settings(updates):
+    """Merge updates dict (github / metrics keys) into settings[site] and persist."""
+    ensure_migrated()
+    if not isinstance(updates, dict):
+        raise ValueError("updates must be a dict")
+    settings = read_settings()
+    raw_site = settings.get(metrics_module.SETTINGS_SITE_KEY)
+    if not isinstance(raw_site, dict):
+        raw_site = {}
+    merged = metrics_module.merge_site_defaults(raw_site)
+    gh_u = updates.get("github")
+    if isinstance(gh_u, dict):
+        gh = merged[metrics_module.SITE_GITHUB_KEY]
+        if isinstance(gh_u.get("org"), str):
+            gh["org"] = gh_u["org"].strip()
+        if isinstance(gh_u.get("login"), str):
+            gh["login"] = gh_u["login"].strip()
+        if isinstance(gh_u.get("repos"), list):
+            gh["repos"] = [str(x).strip() for x in gh_u["repos"] if str(x).strip()]
+    m_u = updates.get("metrics")
+    if isinstance(m_u, dict):
+        m = merged[metrics_module.SITE_METRICS_KEY]
+        if isinstance(m_u.get("cycle_start_states"), list):
+            m["cycle_start_states"] = [str(x).strip() for x in m_u["cycle_start_states"] if str(x).strip()]
+        if isinstance(m_u.get("terminal_state_name"), str):
+            m["terminal_state_name"] = m_u["terminal_state_name"].strip()
+    settings[metrics_module.SETTINGS_SITE_KEY] = merged
+    write_settings(settings)
+    return merged
 
 
 def write_overlay_entry(issue_id, data, is_completed=None):
@@ -912,7 +1046,10 @@ def get_cached_issues():
     """Return merged issues from cache; if cache empty, fetch from Linear then merge and cache."""
     global _issues_cache, _last_fetched
     if _issues_cache is None:
-        linear = fetch_linear_issues()
+        token = get_linear_token()
+        raw = _fetch_all_assigned_issues(token)
+        linear = [_normalize_issue(n) for n in raw]
+        _record_metrics_after_linear_fetch(linear, force_github=False)
         overlay = read_overlay()
         _issues_cache = merge_issues(linear, overlay)
         _last_fetched = datetime.now(timezone.utc).isoformat()
@@ -924,12 +1061,15 @@ def get_last_fetched():
     return _last_fetched
 
 
-def refresh_cache():
-    """Force refetch from Linear, update cache, return merged issues.
+def refresh_cache(force_github: bool = False):
+    """Force refetch from Linear, update cache, return (merged issues, refresh_detail dict).
     Moves overlay entries between inprogress/completed by Linear is_completed; rebalances inprogress only."""
     global _issues_cache, _last_fetched
     ensure_migrated()
-    linear = fetch_linear_issues()
+    token = get_linear_token()
+    raw = _fetch_all_assigned_issues(token)
+    linear = [_normalize_issue(n) for n in raw]
+    refresh_detail = _record_metrics_after_linear_fetch(linear, force_github=force_github)
     inprog = read_inprogress_overlay()
     completed_d = read_completed_overlay()
     completed_ids = {issue.get("identifier") or issue.get("id") for issue in linear if issue.get("is_completed")}
@@ -955,7 +1095,8 @@ def refresh_cache():
     overlay = {**inprog, **completed_d}
     _issues_cache = merge_issues(linear, overlay)
     _last_fetched = datetime.now(timezone.utc).isoformat()
-    return _issues_cache
+    refresh_detail["linear_issue_count"] = len(linear)
+    return _issues_cache, refresh_detail
 
 
 def _get_version():
@@ -970,8 +1111,23 @@ def _get_version():
 
 
 @app.route("/")
-def index():
-    return render_template("index.html", version=_get_version())
+def landing():
+    return render_template("index.html", version=_get_version(), nav_active="landing")
+
+
+@app.route("/dashboard")
+def dashboard():
+    return render_template("dashboard.html", version=_get_version(), nav_active="dashboard")
+
+
+@app.route("/metrics")
+def metrics_page():
+    return render_template("metrics.html", version=_get_version(), nav_active="metrics")
+
+
+@app.route("/settings")
+def settings_page():
+    return render_template("settings.html", version=_get_version(), nav_active="settings")
 
 
 @app.route("/api/issues", methods=["GET"])
@@ -1004,9 +1160,11 @@ def api_issues():
 @app.route("/api/refresh", methods=["POST"])
 def api_refresh():
     try:
-        issues = refresh_cache()
+        data = request.get_json(force=True, silent=True) or {}
+        force_github = bool(data.get("force_github"))
+        issues, refresh_detail = refresh_cache(force_github=force_github)
         last = get_last_fetched()
-        return jsonify({"issues": issues, "last_fetched": last})
+        return jsonify({"issues": issues, "last_fetched": last, "refresh_detail": refresh_detail})
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except requests.HTTPError as e:
@@ -1134,6 +1292,95 @@ def api_priority_labels():
 @app.route("/api/personal-status-options", methods=["GET"])
 def api_personal_status_options():
     return jsonify(PERSONAL_STATUS_OPTIONS)
+
+
+@app.route("/api/metrics", methods=["GET"])
+def api_metrics_get():
+    try:
+        store = metrics_module.read_metrics_store(METRICS_STORE_PATH)
+        site = get_site_settings()
+        return jsonify(metrics_module.build_metrics_api_payload(store, site))
+    except (OSError, TypeError, ValueError) as e:
+        logging.exception("api_metrics_get")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/metrics/backfill-github", methods=["POST"])
+def api_metrics_backfill_github():
+    try:
+        gh_token = metrics_module.get_github_token()
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    ensure_migrated()
+    completed = read_completed_overlay()
+    site = get_site_settings()
+    terminal = (site.get(metrics_module.SITE_METRICS_KEY) or {}).get("terminal_state_name", "Done")
+
+    def linear_request_fn(query, variables):
+        tok = get_linear_token()
+        return _linear_request(tok, query, variables)
+
+    try:
+        result = metrics_module.run_github_backfill(
+            completed,
+            site,
+            gh_token,
+            linear_request_fn,
+            terminal,
+            path=METRICS_STORE_PATH,
+        )
+        return jsonify({"ok": True, **result})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except requests.HTTPError as e:
+        return jsonify({"error": str(e)}), (e.response.status_code if e.response else 502)
+    except (requests.RequestException, RuntimeError, OSError) as e:
+        return jsonify({"error": str(e)}), 502
+
+
+@app.route("/api/metrics/backfill-linear-dwell", methods=["POST"])
+def api_metrics_backfill_linear_dwell():
+    """Rebuild linear_transitions from Linear issue.history (completed cohort + all assigned issues)."""
+    try:
+        tok = get_linear_token()
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    ensure_migrated()
+    completed = read_completed_overlay()
+    site = get_site_settings()
+    terminal = (site.get(metrics_module.SITE_METRICS_KEY) or {}).get("terminal_state_name", "Done")
+
+    def linear_request_fn(query, variables):
+        return _linear_request(tok, query, variables)
+
+    try:
+        assigned_nodes = _fetch_all_assigned_issues(tok, for_backfill=True)
+        result = metrics_module.run_linear_dwell_backfill(
+            completed,
+            linear_request_fn,
+            terminal,
+            path=METRICS_STORE_PATH,
+            assigned_nodes=assigned_nodes,
+        )
+        return jsonify({"ok": True, **result})
+    except (requests.RequestException, RuntimeError, OSError) as e:
+        return jsonify({"error": str(e)}), 502
+
+
+@app.route("/api/settings/site", methods=["GET"])
+def api_settings_site_get():
+    ensure_migrated()
+    return jsonify(get_site_settings())
+
+
+@app.route("/api/settings/site", methods=["POST"])
+def api_settings_site_post():
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        merged = write_site_settings(data)
+        return jsonify({"ok": True, "site": merged})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
 
 
 if __name__ == "__main__":

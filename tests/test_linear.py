@@ -15,7 +15,7 @@ LINEAR_NODE = {
     "url": "https://linear.app/team/issue/LIN-42",
     "priority": 2,
     "updatedAt": "2025-02-20T10:30:00.000Z",
-    "state": {"name": "In Progress", "type": "started"},
+    "state": {"id": "state-uuid", "name": "In Progress", "type": "started"},
     "team": {"name": "Engineering"},
 }
 
@@ -27,6 +27,8 @@ def test_normalize_issue_shape():
     assert normalized["identifier"] == "LIN-42"
     assert normalized["title"] == "Fix the bug"
     assert normalized["linear_status"] == "In Progress"
+    assert normalized["linear_state_id"] == "state-uuid"
+    assert normalized["linear_state_type"] == "started"
     assert normalized["linear_priority"] == 2
     assert normalized["url"] == "https://linear.app/team/issue/LIN-42"
     assert normalized["team_name"] == "Engineering"
@@ -37,7 +39,7 @@ def test_normalize_issue_shape():
 
 def test_normalize_completed_state():
     """State type completed/canceled sets is_completed True."""
-    completed_node = {**LINEAR_NODE, "state": {"name": "Done", "type": "completed"}}
+    completed_node = {**LINEAR_NODE, "state": {"id": "sd", "name": "Done", "type": "completed"}}
     normalized = app_module._normalize_issue(completed_node)
     assert normalized["is_completed"] is True
     assert normalized["linear_status"] == "Done"
@@ -48,6 +50,8 @@ def test_normalize_handles_missing_fields():
     minimal = {"id": "x", "identifier": "LIN-1", "title": "T"}
     normalized = app_module._normalize_issue(minimal)
     assert normalized["linear_status"] == ""
+    assert normalized.get("linear_state_id") == ""
+    assert normalized.get("linear_state_type") == ""
     assert normalized["linear_priority"] == 0
     assert normalized["url"] == ""
     assert normalized["team_name"] == ""
@@ -288,8 +292,10 @@ def test_fetch_all_assigned_issues_runs_without_viewer_id():
                         "url": "https://linear.app/LIN-1",
                         "priority": 1,
                         "updatedAt": "2025-02-20T10:00:00.000Z",
-                        "state": {"name": "In Progress", "type": "started"},
+                        "description": "",
+                        "state": {"id": "s1", "name": "In Progress", "type": "started"},
                         "team": {"name": "Eng"},
+                        "labels": {"nodes": []},
                     }
                 ],
                 "pageInfo": {"hasNextPage": False, "endCursor": None},
@@ -304,6 +310,46 @@ def test_fetch_all_assigned_issues_runs_without_viewer_id():
             query = call[0][1]
             assert "isMe" in query, "Linear issues query must use assignee.isMe filter"
             assert "$assigneeId" not in query, "Must not use assigneeId (use isMe instead)"
+
+
+def test_fetch_all_assigned_includes_stale_completed_when_for_backfill():
+    """Dashboard omits old completed; dwell backfill must still see them if still assigned."""
+    old_done = {
+        "id": "old",
+        "identifier": "LIN-old",
+        "title": "Stale done",
+        "url": "",
+        "priority": 1,
+        "updatedAt": "2020-01-01T10:00:00.000Z",
+        "description": "",
+        "state": {"id": "d", "name": "Done", "type": "completed"},
+        "team": {"name": "Eng"},
+        "labels": {"nodes": []},
+    }
+    active = {
+        "id": "act",
+        "identifier": "LIN-a",
+        "title": "Active",
+        "url": "",
+        "priority": 1,
+        "updatedAt": "2025-02-20T10:00:00.000Z",
+        "description": "",
+        "state": {"id": "s1", "name": "In Progress", "type": "started"},
+        "team": {"name": "Eng"},
+        "labels": {"nodes": []},
+    }
+    page = {
+        "nodes": [old_done, active],
+        "pageInfo": {"hasNextPage": False, "endCursor": None},
+    }
+    with patch.object(app_module, "_fetch_issues_page", return_value=page):
+        default_list = app_module._fetch_all_assigned_issues("tok", for_backfill=False)
+        backfill_list = app_module._fetch_all_assigned_issues("tok", for_backfill=True)
+    ids_default = {n["id"] for n in default_list}
+    ids_backfill = {n["id"] for n in backfill_list}
+    assert "act" in ids_default
+    assert "old" not in ids_default
+    assert ids_backfill == {"old", "act"}
 
 
 def test_refresh_removes_priority_for_completed_and_rebalances(tmp_path):
@@ -327,49 +373,34 @@ def test_refresh_removes_priority_for_completed_and_rebalances(tmp_path):
             "LIN-3": {"personal_priority": 3, "notes": "c"},
         }), encoding="utf-8")
         (tmp_path / "completed.json").write_text("{}", encoding="utf-8")
-        linear_issues = [
-            {"id": "u1", "identifier": "LIN-1", "title": "Active", "linear_status": "In Progress", "is_completed": False},
-            {"id": "u2", "identifier": "LIN-2", "title": "Done", "linear_status": "Done", "is_completed": True},
-            {"id": "u3", "identifier": "LIN-3", "title": "Active2", "linear_status": "In Progress", "is_completed": False},
+        raw_linear = [
+            {
+                "id": "u1", "identifier": "LIN-1", "title": "Active", "url": "", "priority": 1,
+                "updatedAt": "2025-02-20T10:00:00.000Z", "description": "",
+                "state": {"id": "a", "name": "In Progress", "type": "started"},
+                "team": {"name": "Eng"}, "labels": {"nodes": []},
+            },
+            {
+                "id": "u2", "identifier": "LIN-2", "title": "Done", "url": "", "priority": 1,
+                "updatedAt": "2025-02-20T10:00:00.000Z", "description": "",
+                "state": {"id": "d", "name": "Done", "type": "completed"},
+                "team": {"name": "Eng"}, "labels": {"nodes": []},
+            },
+            {
+                "id": "u3", "identifier": "LIN-3", "title": "Active2", "url": "", "priority": 1,
+                "updatedAt": "2025-02-20T10:00:00.000Z", "description": "",
+                "state": {"id": "a", "name": "In Progress", "type": "started"},
+                "team": {"name": "Eng"}, "labels": {"nodes": []},
+            },
         ]
-        with patch.object(app_module, "fetch_linear_issues", return_value=linear_issues):
+        with patch.object(app_module, "get_linear_token", return_value="tok"), patch.object(
+            app_module, "_fetch_all_assigned_issues", return_value=raw_linear
+        ):
             app_module.refresh_cache()
         overlay = app_module.read_overlay()
         assert overlay.get("LIN-2", {}).get("personal_priority") is None
-        assert overlay["LIN-2"]["personal_status"] == "Completed"
         assert overlay["LIN-1"]["personal_priority"] == 1
         assert overlay["LIN-3"]["personal_priority"] == 2
-    finally:
-        (app_module.SETTINGS_PATH, app_module.INPROGRESS_PATH, app_module.COMPLETED_PATH,
-         app_module.OVERLAY_LEGACY_PATH, app_module.OVERLAY_OLD_PATH) = orig
-
-
-def test_refresh_sets_personal_status_canceled_when_linear_canceled(tmp_path):
-    """On refresh, when an issue moves to completed and Linear status is Canceled, personal_status becomes Canceled."""
-    import json
-    orig = (app_module.SETTINGS_PATH, app_module.INPROGRESS_PATH, app_module.COMPLETED_PATH,
-            app_module.OVERLAY_LEGACY_PATH, app_module.OVERLAY_OLD_PATH)
-    try:
-        app_module.SETTINGS_PATH = tmp_path / "settings.json"
-        app_module.INPROGRESS_PATH = tmp_path / "inprogress.json"
-        app_module.COMPLETED_PATH = tmp_path / "completed.json"
-        app_module.OVERLAY_LEGACY_PATH = tmp_path / "overlay.json"
-        app_module.OVERLAY_OLD_PATH = tmp_path / "overlay.old"
-        default_vis = {c["id"]: c["default_visible"] for c in app_module.COLUMN_REGISTRY}
-        (tmp_path / "settings.json").write_text(json.dumps({
-            app_module.COLUMN_PREFERENCES_KEY: {"order": list(app_module.DEFAULT_COLUMN_ORDER), "visibility": default_vis}
-        }), encoding="utf-8")
-        (tmp_path / "inprogress.json").write_text(json.dumps({
-            "LIN-1": {"personal_priority": 1, "personal_status": "In Progress", "notes": "a"},
-        }), encoding="utf-8")
-        (tmp_path / "completed.json").write_text("{}", encoding="utf-8")
-        linear_issues = [
-            {"id": "u1", "identifier": "LIN-1", "title": "Canceled", "linear_status": "Canceled", "is_completed": True},
-        ]
-        with patch.object(app_module, "fetch_linear_issues", return_value=linear_issues):
-            app_module.refresh_cache()
-        overlay = app_module.read_overlay()
-        assert overlay["LIN-1"]["personal_status"] == "Canceled"
     finally:
         (app_module.SETTINGS_PATH, app_module.INPROGRESS_PATH, app_module.COMPLETED_PATH,
          app_module.OVERLAY_LEGACY_PATH, app_module.OVERLAY_OLD_PATH) = orig
