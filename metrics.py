@@ -586,7 +586,7 @@ def discover_pr_refs_for_issue(
             user = ((pr.get("user") or {}) if isinstance(pr.get("user"), dict) else {}).get("login") or ""
             if user.strip().lower() != login_l:
                 continue
-            title = (pr.get("title") or "") or ""
+            title = pr.get("title") or ""
             head = pr.get("head") if isinstance(pr.get("head"), dict) else {}
             ref = (head.get("ref") or "") if isinstance(head, dict) else ""
             blob = f"{title} {ref}"

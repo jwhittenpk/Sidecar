@@ -277,6 +277,16 @@
         return x >= br.lo && x < br.hi;
       }
 
+      function esc(s) {
+        if (s == null) return '';
+        return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      }
+
+      function safeHref(url) {
+        if (!url || typeof url !== 'string') return '';
+        return /^https?:\/\//i.test(url) ? esc(url) : '';
+      }
+
       function fmtDays(v) {
         if (typeof v !== 'number' || isNaN(v)) return String(v);
         return v % 1 === 0 ? v.toFixed(0) : v.toFixed(1);
@@ -345,27 +355,32 @@
           const ageLabel = isDraft
             ? 'Draft'
             : (item.waitDays != null ? fmtWaitDays(item.waitDays) + 'd waiting' : 'age unknown');
-          const titleText = r.title || (r.repo + ' #' + r.number);
-          const idText = r.linear_identifier ? r.linear_identifier + ' · ' : '';
+          const titleText = esc(r.title || (r.repo + ' #' + r.number));
+          const idText = r.linear_identifier ? esc(r.linear_identifier) + ' · ' : '';
+          const href = safeHref(r.html_url);
           li.innerHTML =
             '<span class="' + ageClass + '">' + ageLabel + '</span>' +
-            (r.html_url
-              ? '<a href="' + r.html_url + '" target="_blank" rel="noopener noreferrer">' + titleText + '</a>'
+            (href
+              ? '<a href="' + href + '" target="_blank" rel="noopener noreferrer">' + titleText + '</a>'
               : '<span>' + titleText + '</span>') +
-            '<span class="pr-id">' + idText + r.repo + ' #' + r.number + '</span>';
+            '<span class="pr-id">' + idText + esc(r.repo) + ' #' + (r.number != null ? r.number : '') + '</span>';
           el.appendChild(li);
         });
       }
 
       function appendPrListItem(ul, r) {
         const li = document.createElement('li');
-        const titleText = r.title || (r.repo + ' #' + r.number);
-        const sub = [r.linear_identifier, r.repo + ' #' + r.number, r.open_days_non_draft != null ? fmtDays(r.open_days_non_draft) + 'd' : null]
-          .filter(Boolean).join(' · ');
+        const titleText = esc(r.title || (r.repo + ' #' + r.number));
+        const href = safeHref(r.html_url);
+        const sub = [
+          r.linear_identifier ? esc(r.linear_identifier) : null,
+          esc(r.repo) + ' #' + (r.number != null ? r.number : ''),
+          r.open_days_non_draft != null ? fmtDays(r.open_days_non_draft) + 'd' : null
+        ].filter(Boolean).join(' · ');
         li.innerHTML =
           '<div class="pr-meta">' +
-          (r.html_url
-            ? '<a class="pr-title" href="' + r.html_url + '" target="_blank" rel="noopener noreferrer">' + titleText + '</a>'
+          (href
+            ? '<a class="pr-title" href="' + href + '" target="_blank" rel="noopener noreferrer">' + titleText + '</a>'
             : '<span class="pr-title">' + titleText + '</span>') +
           '</div>' +
           '<div class="pr-sub">' + sub + '</div>';
