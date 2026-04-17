@@ -1,5 +1,13 @@
 ## v0.2.7
 
+- Merge pull request #15 from jwhittenpk/feature/sidecar-14
+- fix: mock get_linear_token in test fixture to prevent 400s in CI
+- chore: merge main, correct version to v0.2.7
+- feat: concurrent background metrics refresh with configurable cooldown
+- chore: update CHANGELOG and VERSION for v0.2.6
+
+## v0.2.7
+
 - feat: background metrics refresh — Linear snapshots and GitHub enrichment run concurrently on a shared timer
 - feat: GitHub enrichment cooldown configurable in Settings (default 4 hours)
 - perf: dashboard loads instantly; periodic refresh no longer blocks page render
